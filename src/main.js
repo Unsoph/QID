@@ -1,3 +1,4 @@
+
 import * as ort from 'onnxruntime-web';
 
 const imageInput = document.getElementById('image-input');
@@ -31,7 +32,7 @@ function preprocessImage(image) {
   return new ort.Tensor('float32', input, [1, 3, height, width]);
 }
 
-function nonMaxSuppression(boxes, iouThreshold = 0.5) {
+function nonMaxSuppression(boxes, iouThreshold = 0.8) {
   if (boxes.length === 0) return [];
 
   boxes.sort((a, b) => b.conf - a.conf);
@@ -83,7 +84,7 @@ async function handleImageUpload(event) {
       const offset = i * numAttrs;
       const [x, y, w, h, conf] = data.slice(offset, offset + 5);
 
-      if (conf > 0.5) {
+      if (conf > 0.8) {
         boxes.push({ x: x * img.width, y: y * img.height, w: w * img.width, h: h * img.height, conf });
       }
     }
