@@ -95,7 +95,7 @@ async function handleImageUpload(event) {
       const h = rawData[i + 3 * numDetections];
       const conf = rawData[i + 4 * numDetections];
 
-      if (conf > 0.4) {
+      if (conf > 0.8) {
         boxes.push({ x, y, w, h, conf });
       }
     }
