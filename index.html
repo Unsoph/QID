@@ -2,13 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>YOLOv8 Client Inference</title>
+    <title>ONNX.js YOLOv8 Web App</title>
   </head>
   <body>
     <h2>Upload an Image</h2>
-    <input type="file" id="imageInput" />
-    <br />
-    <canvas id="resultCanvas"></canvas>
+    <input type="file" id="upload" accept="image/*" />
+    <br /><br />
+    <canvas id="canvas"></canvas>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
