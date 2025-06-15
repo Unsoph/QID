@@ -1,4 +1,3 @@
-
 import * as ort from 'onnxruntime-web';
 
 const imageInput = document.getElementById('image-input');
