@@ -63,7 +63,7 @@ async function handleImageUpload(event) {
       const h = outputData[i * 5 + 3];
       const conf = outputData[i * 5 + 4];
 
-      const confThreshold = 0.3;
+      const confThreshold = 0.8;
       if (conf > confThreshold) {
         boxes.push({ x, y, w, h, conf });
       }
