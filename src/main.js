@@ -6,7 +6,7 @@ const ctx = canvas.getContext('2d');
 let session;
 
 async function init() {
-  session = await ort.InferenceSession.create('best.onnx'); // ✅ FIXED PATH
+  session = await ort.InferenceSession.create('best.onnx');
   console.log("ONNX model loaded.");
 }
 
@@ -23,12 +23,41 @@ function preprocessImage(image) {
 
   const input = new Float32Array(width * height * 3);
   for (let i = 0; i < width * height; i++) {
-    input[i] = data[i * 4] / 255; // R
-    input[i + width * height] = data[i * 4 + 1] / 255; // G
-    input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
+    input[i] = data[i * 4] / 255;
+    input[i + width * height] = data[i * 4 + 1] / 255;
+    input[i + 2 * width * height] = data[i * 4 + 2] / 255;
   }
 
   return new ort.Tensor('float32', input, [1, 3, height, width]);
+}
+
+function nonMaxSuppression(boxes, iouThreshold = 0.5) {
+  if (boxes.length === 0) return [];
+
+  boxes.sort((a, b) => b.conf - a.conf);
+  const selectedBoxes = [];
+
+  function iou(boxA, boxB) {
+    const x1 = Math.max(boxA.x - boxA.w / 2, boxB.x - boxB.w / 2);
+    const y1 = Math.max(boxA.y - boxA.h / 2, boxB.y - boxB.h / 2);
+    const x2 = Math.min(boxA.x + boxA.w / 2, boxB.x + boxB.w / 2);
+    const y2 = Math.min(boxA.y + boxA.h / 2, boxB.y + boxB.h / 2);
+
+    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const boxAArea = boxA.w * boxA.h;
+    const boxBArea = boxB.w * boxB.h;
+    const union = boxAArea + boxBArea - interArea;
+
+    return interArea / union;
+  }
+
+  while (boxes.length > 0) {
+    const chosen = boxes.shift();
+    selectedBoxes.push(chosen);
+    boxes = boxes.filter(box => iou(chosen, box) < iouThreshold);
+  }
+
+  return selectedBoxes;
 }
 
 async function handleImageUpload(event) {
@@ -44,41 +73,32 @@ async function handleImageUpload(event) {
     const feeds = { images: inputTensor };
 
     const output = await session.run(feeds);
-    console.log("Model output:", output);
-    console.log("Output keys:", Object.keys(output));
-    console.log("Output tensor:", output[Object.keys(output)[0]]);
-    console.log("Output shape:", output[Object.keys(output)[0]].dims);
+    const outputTensor = output[Object.keys(output)[0]];
+    const [batch, numPreds, numAttrs] = outputTensor.dims;
 
-    // 🔍 Extract and draw boxes
-    const outputData = output[Object.keys(output)[0]].data;
-    const outputDims = output[Object.keys(output)[0]].dims;
-
+    const data = outputTensor.data;
     const boxes = [];
-    const [batch, channels, numPreds] = outputDims;
 
     for (let i = 0; i < numPreds; i++) {
-      const x = outputData[i * 5];
-      const y = outputData[i * 5 + 1];
-      const w = outputData[i * 5 + 2];
-      const h = outputData[i * 5 + 3];
-      const conf = outputData[i * 5 + 4];
+      const offset = i * numAttrs;
+      const [x, y, w, h, conf] = data.slice(offset, offset + 5);
 
-      const confThreshold = 0.8;
-      if (conf > confThreshold) {
-        boxes.push({ x, y, w, h, conf });
+      if (conf > 0.5) {
+        boxes.push({ x: x * img.width, y: y * img.height, w: w * img.width, h: h * img.height, conf });
       }
     }
 
+    const finalBoxes = nonMaxSuppression(boxes);
+
     ctx.strokeStyle = 'red';
     ctx.lineWidth = 2;
-
-    for (const box of boxes) {
+    for (const box of finalBoxes) {
       const left = box.x - box.w / 2;
       const top = box.y - box.h / 2;
       ctx.strokeRect(left, top, box.w, box.h);
     }
 
-    alert(`Inference complete! ${boxes.length} object(s) detected.`);
+    alert(`Inference complete! ${finalBoxes.length} object(s) detected.`);
   };
 
   img.src = URL.createObjectURL(file);
