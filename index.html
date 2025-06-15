@@ -4,12 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>YOLOv8 ONNX Inference</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+      canvas {
+        margin-top: 20px;
+        border: 1px solid #333;
+        max-width: 100%;
+      }
+    </style>
   </head>
   <body>
-    <h2>Upload Image for YOLOv8 ONNX Inference</h2>
-    <input type="file" id="imageInput" accept="image/*" />
-    <br><br>
-    <canvas id="outputCanvas" style="max-width: 100%; border: 1px solid black;"></canvas>
+    <h1>Upload Image for YOLOv8 ONNX Inference</h1>
+    <input type="file" id="image-input" accept="image/*" />
+    <br />
+    <canvas id="output-canvas" width="640" height="640"></canvas>
 
     <script type="module" src="./src/main.js"></script>
   </body>
