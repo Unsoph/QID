@@ -6,7 +6,7 @@ const ctx = canvas.getContext('2d');
 let session;
 
 async function init() {
-  session = await ort.InferenceSession.create('./public/best.onnx');
+  session = await ort.InferenceSession.create('best.onnx'); // ✅ FIXED PATH
   console.log("ONNX model loaded.");
 }
 
@@ -14,21 +14,16 @@ function preprocessImage(image) {
   const width = 640;
   const height = 640;
 
-  // Set canvas size for preprocessing
   canvas.width = width;
   canvas.height = height;
-
-  // Draw image to canvas
   ctx.drawImage(image, 0, 0, width, height);
 
-  // Get image data
   const imageData = ctx.getImageData(0, 0, width, height);
   const { data } = imageData;
 
-  // Normalize pixel values and rearrange to CHW
   const input = new Float32Array(width * height * 3);
   for (let i = 0; i < width * height; i++) {
-    input[i] = data[i * 4] / 255;       // R
+    input[i] = data[i * 4] / 255; // R
     input[i + width * height] = data[i * 4 + 1] / 255; // G
     input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
   }
@@ -50,7 +45,6 @@ async function handleImageUpload(event) {
 
     const output = await session.run(feeds);
 
-    // 🔍 Debug: print model output info
     console.log("Model output:", output);
     console.log("Output keys:", Object.keys(output));
     console.log("Output tensor:", output[Object.keys(output)[0]]);
