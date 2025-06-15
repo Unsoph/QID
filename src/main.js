@@ -1,4 +1,3 @@
-
 import * as ort from 'onnxruntime-web';
 
 const imageInput = document.getElementById('image-input');
@@ -15,6 +14,7 @@ function preprocessImage(image) {
   const width = 640;
   const height = 640;
 
+  // Resize image for model
   canvas.width = width;
   canvas.height = height;
   ctx.drawImage(image, 0, 0, width, height);
@@ -24,41 +24,48 @@ function preprocessImage(image) {
 
   const input = new Float32Array(width * height * 3);
   for (let i = 0; i < width * height; i++) {
-    input[i] = data[i * 4] / 255;
-    input[i + width * height] = data[i * 4 + 1] / 255;
-    input[i + 2 * width * height] = data[i * 4 + 2] / 255;
+    input[i] = data[i * 4] / 255; // R
+    input[i + width * height] = data[i * 4 + 1] / 255; // G
+    input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
   }
 
   return new ort.Tensor('float32', input, [1, 3, height, width]);
 }
 
-function nonMaxSuppression(boxes, iouThreshold = 0.8) {
-  if (boxes.length === 0) return [];
-
+function nonMaxSuppression(boxes, iouThreshold = 0.5) {
   boxes.sort((a, b) => b.conf - a.conf);
-  const selectedBoxes = [];
+  const selected = [];
 
-  function iou(boxA, boxB) {
-    const x1 = Math.max(boxA.x - boxA.w / 2, boxB.x - boxB.w / 2);
-    const y1 = Math.max(boxA.y - boxA.h / 2, boxB.y - boxB.h / 2);
-    const x2 = Math.min(boxA.x + boxA.w / 2, boxB.x + boxB.w / 2);
-    const y2 = Math.min(boxA.y + boxA.h / 2, boxB.y + boxB.h / 2);
+  for (let i = 0; i < boxes.length; i++) {
+    const a = boxes[i];
+    let keep = true;
 
-    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-    const boxAArea = boxA.w * boxA.h;
-    const boxBArea = boxB.w * boxB.h;
-    const union = boxAArea + boxBArea - interArea;
+    for (let j = 0; j < selected.length; j++) {
+      const b = selected[j];
+      const iou = calculateIoU(a, b);
+      if (iou > iouThreshold) {
+        keep = false;
+        break;
+      }
+    }
 
-    return interArea / union;
+    if (keep) selected.push(a);
   }
 
-  while (boxes.length > 0) {
-    const chosen = boxes.shift();
-    selectedBoxes.push(chosen);
-    boxes = boxes.filter(box => iou(chosen, box) < iouThreshold);
-  }
+  return selected;
+}
 
-  return selectedBoxes;
+function calculateIoU(a, b) {
+  const x1 = Math.max(a.x - a.w / 2, b.x - b.w / 2);
+  const y1 = Math.max(a.y - a.h / 2, b.y - b.h / 2);
+  const x2 = Math.min(a.x + a.w / 2, b.x + b.w / 2);
+  const y2 = Math.min(a.y + a.h / 2, b.y + b.h / 2);
+
+  const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const boxAArea = a.w * a.h;
+  const boxBArea = b.w * b.h;
+
+  return interArea / (boxAArea + boxBArea - interArea);
 }
 
 async function handleImageUpload(event) {
@@ -66,40 +73,57 @@ async function handleImageUpload(event) {
   const img = new Image();
 
   img.onload = async () => {
+    // Resize canvas to original image size for display
     canvas.width = img.width;
     canvas.height = img.height;
-    ctx.drawImage(img, 0, 0, img.width, img.height);
+    ctx.drawImage(img, 0, 0);
 
     const inputTensor = preprocessImage(img);
     const feeds = { images: inputTensor };
 
     const output = await session.run(feeds);
-    const outputTensor = output[Object.keys(output)[0]];
-    const [batch, numPreds, numAttrs] = outputTensor.dims;
+    const outputTensor = output[Object.keys(output)[0]]; // Usually 'output0'
+    const rawData = outputTensor.data;
+    const [batch, channels, numDetections] = outputTensor.dims; // [1, 5, 8400]
 
-    const data = outputTensor.data;
     const boxes = [];
 
-    for (let i = 0; i < numPreds; i++) {
-      const offset = i * numAttrs;
-      const [x, y, w, h, conf] = data.slice(offset, offset + 5);
+    for (let i = 0; i < numDetections; i++) {
+      const x = rawData[i];
+      const y = rawData[i + numDetections];
+      const w = rawData[i + 2 * numDetections];
+      const h = rawData[i + 3 * numDetections];
+      const conf = rawData[i + 4 * numDetections];
 
-      if (conf > 0.8) {
-        boxes.push({ x: x * img.width, y: y * img.height, w: w * img.width, h: h * img.height, conf });
+      if (conf > 0.4) {
+        boxes.push({ x, y, w, h, conf });
       }
     }
 
+    console.log(`Detections before NMS: ${boxes.length}`);
     const finalBoxes = nonMaxSuppression(boxes);
+    console.log(`Detections after NMS: ${finalBoxes.length}`);
 
-    ctx.strokeStyle = 'red';
+    // Redraw original image before drawing boxes
+    ctx.drawImage(img, 0, 0, img.width, img.height);
+
+    const scaleX = img.width / 640;
+    const scaleY = img.height / 640;
+
+    ctx.strokeStyle = 'lime';
     ctx.lineWidth = 2;
-    for (const box of finalBoxes) {
-      const left = box.x - box.w / 2;
-      const top = box.y - box.h / 2;
-      ctx.strokeRect(left, top, box.w, box.h);
-    }
+    ctx.font = '16px Arial';
+    ctx.fillStyle = 'lime';
 
-    alert(`Inference complete! ${finalBoxes.length} object(s) detected.`);
+    for (const box of finalBoxes) {
+      const left = (box.x - box.w / 2) * scaleX;
+      const top = (box.y - box.h / 2) * scaleY;
+      const width = box.w * scaleX;
+      const height = box.h * scaleY;
+
+      ctx.strokeRect(left, top, width, height);
+      ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
+    }
   };
 
   img.src = URL.createObjectURL(file);
