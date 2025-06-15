@@ -44,13 +44,41 @@ async function handleImageUpload(event) {
     const feeds = { images: inputTensor };
 
     const output = await session.run(feeds);
-
     console.log("Model output:", output);
     console.log("Output keys:", Object.keys(output));
     console.log("Output tensor:", output[Object.keys(output)[0]]);
     console.log("Output shape:", output[Object.keys(output)[0]].dims);
 
-    alert("Inference complete! Check the browser console.");
+    // 🔍 Extract and draw boxes
+    const outputData = output[Object.keys(output)[0]].data;
+    const outputDims = output[Object.keys(output)[0]].dims;
+
+    const boxes = [];
+    const [batch, channels, numPreds] = outputDims;
+
+    for (let i = 0; i < numPreds; i++) {
+      const x = outputData[i * 5];
+      const y = outputData[i * 5 + 1];
+      const w = outputData[i * 5 + 2];
+      const h = outputData[i * 5 + 3];
+      const conf = outputData[i * 5 + 4];
+
+      const confThreshold = 0.3;
+      if (conf > confThreshold) {
+        boxes.push({ x, y, w, h, conf });
+      }
+    }
+
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+
+    for (const box of boxes) {
+      const left = box.x - box.w / 2;
+      const top = box.y - box.h / 2;
+      ctx.strokeRect(left, top, box.w, box.h);
+    }
+
+    alert(`Inference complete! ${boxes.length} object(s) detected.`);
   };
 
   img.src = URL.createObjectURL(file);
