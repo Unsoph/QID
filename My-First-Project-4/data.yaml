@@ -1,0 +1,12 @@
+names:
+- Aadhar Card
+nc: 1
+roboflow:
+  license: CC BY 4.0
+  project: my-first-project-61agt
+  url: https://universe.roboflow.com/shreyas-xxl2f/my-first-project-61agt/dataset/4
+  version: 4
+  workspace: shreyas-xxl2f
+test: ../test/images
+train: ../train/images
+val: ../valid/images
