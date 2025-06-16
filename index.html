@@ -1,29 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>YOLOv8 ONNX Inference</title>
-    <style>
-      body {
-        font-family: sans-serif;
-        text-align: center;
-        padding: 20px;
-      }
-      canvas {
-        margin-top: 20px;
-        border: 1px solid #333;
-        max-width: 100%;
-        height: auto;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Upload Image for YOLOv8 ONNX Inference</h1>
-    <input type="file" id="image-input" accept="image/*" />
-    <br />
-    <canvas id="output-canvas" width="640" height="640"></canvas>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aadhaar Card Detector</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #121212;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+    }
 
-    <script type="module" src="./src/main.js"></script>
-  </body>
+    h1 {
+      text-align: center;
+      font-size: 1.5rem;
+    }
+
+    input[type="file"] {
+      margin: 1rem 0;
+    }
+
+    canvas {
+      max-width: 100%;
+      height: auto;
+      border: 2px solid #00ff88;
+      border-radius: 8px;
+    }
+
+    .note {
+      font-size: 0.9rem;
+      opacity: 0.8;
+      text-align: center;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Aadhaar Card Detector</h1>
+  <input type="file" id="image-input" accept="image/*" />
+  <canvas id="output-canvas"></canvas>
+  <p class="note">Detected Aadhaar cards will be downloaded automatically.</p>
+  <script type="module" src="index.js"></script>
+</body>
 </html>
