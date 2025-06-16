@@ -6,30 +6,45 @@ const ctx = canvas.getContext('2d');
 let session;
 
 async function init() {
-  session = await ort.InferenceSession.create('best.onnx');
+  session = await ort.InferenceSession.create('./best.onnx');
   console.log("ONNX model loaded.");
 }
 
 function preprocessImage(image) {
-  const width = 640;
-  const height = 640;
+  const modelSize = 640;
+  const canvasTemp = document.createElement('canvas');
+  const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
 
-  // Resize image for model
-  canvas.width = width;
-  canvas.height = height;
-  ctx.drawImage(image, 0, 0, width, height);
+  const imgW = image.naturalWidth;
+  const imgH = image.naturalHeight;
+  const scale = Math.min(modelSize / imgW, modelSize / imgH);
+  const resizedW = Math.round(imgW * scale);
+  const resizedH = Math.round(imgH * scale);
 
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const { data } = imageData;
+  const padX = Math.floor((modelSize - resizedW) / 2);
+  const padY = Math.floor((modelSize - resizedH) / 2);
 
-  const input = new Float32Array(width * height * 3);
-  for (let i = 0; i < width * height; i++) {
-    input[i] = data[i * 4] / 255; // R
-    input[i + width * height] = data[i * 4 + 1] / 255; // G
-    input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
+  canvasTemp.width = modelSize;
+  canvasTemp.height = modelSize;
+
+  ctxTemp.fillStyle = 'black';
+  ctxTemp.fillRect(0, 0, modelSize, modelSize);
+  ctxTemp.drawImage(image, padX, padY, resizedW, resizedH);
+
+  const imageData = ctxTemp.getImageData(0, 0, modelSize, modelSize).data;
+  const floatData = new Float32Array(modelSize * modelSize * 3);
+
+  for (let i = 0; i < modelSize * modelSize; i++) {
+    floatData[i] = imageData[i * 4] / 255;
+    floatData[i + modelSize * modelSize] = imageData[i * 4 + 1] / 255;
+    floatData[i + 2 * modelSize * modelSize] = imageData[i * 4 + 2] / 255;
   }
 
-  return new ort.Tensor('float32', input, [1, 3, height, width]);
+  preprocessImage.lastPadX = padX;
+  preprocessImage.lastPadY = padY;
+  preprocessImage.lastScale = scale;
+
+  return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
 }
 
 function nonMaxSuppression(boxes, iouThreshold = 0.5) {
@@ -73,18 +88,16 @@ async function handleImageUpload(event) {
   const img = new Image();
 
   img.onload = async () => {
-    // Resize canvas to original image size for display
-    canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
     ctx.drawImage(img, 0, 0);
 
     const inputTensor = preprocessImage(img);
     const feeds = { images: inputTensor };
-
     const output = await session.run(feeds);
-    const outputTensor = output[Object.keys(output)[0]]; // Usually 'output0'
+    const outputTensor = output[Object.keys(output)[0]];
     const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims; // [1, 5, 8400]
+    const [batch, channels, numDetections] = outputTensor.dims;
 
     const boxes = [];
 
@@ -104,11 +117,11 @@ async function handleImageUpload(event) {
     const finalBoxes = nonMaxSuppression(boxes);
     console.log(`Detections after NMS: ${finalBoxes.length}`);
 
-    // Redraw original image before drawing boxes
-    ctx.drawImage(img, 0, 0, img.width, img.height);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
 
-    const scaleX = img.width / 640;
-    const scaleY = img.height / 640;
+    const scale = 1 / preprocessImage.lastScale;
+    const padX = preprocessImage.lastPadX;
+    const padY = preprocessImage.lastPadY;
 
     ctx.strokeStyle = 'lime';
     ctx.lineWidth = 2;
@@ -116,12 +129,15 @@ async function handleImageUpload(event) {
     ctx.fillStyle = 'lime';
 
     for (const box of finalBoxes) {
-      const left = (box.x - box.w / 2) * scaleX;
-      const top = (box.y - box.h / 2) * scaleY;
-      const width = box.w * scaleX;
-      const height = box.h * scaleY;
+      const x = (box.x - padX) * scale;
+      const y = (box.y - padY) * scale;
+      const w = box.w * scale;
+      const h = box.h * scale;
 
-      ctx.strokeRect(left, top, width, height);
+      const left = x - w / 2;
+      const top = y - h / 2;
+
+      ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
     }
   };
