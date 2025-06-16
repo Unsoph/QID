@@ -157,7 +157,6 @@ async function handleImageUpload(event) {
       cropAndDownload(img, left, top, w, h, i + 1);
     }
   };
-
   img.src = URL.createObjectURL(file);
 }
 
