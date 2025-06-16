@@ -83,6 +83,22 @@ function calculateIoU(a, b) {
   return interArea / (boxAArea + boxBArea - interArea);
 }
 
+function cropAndDownload(image, x, y, w, h, index) {
+  const cropCanvas = document.createElement('canvas');
+  const cropCtx = cropCanvas.getContext('2d');
+  cropCanvas.width = w;
+  cropCanvas.height = h;
+  cropCtx.drawImage(image, x, y, w, h, 0, 0, w, h);
+
+  cropCanvas.toBlob(blob => {
+    const link = document.createElement('a');
+    link.download = `crop_${index}.png`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, 'image/png');
+}
+
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
@@ -113,9 +129,7 @@ async function handleImageUpload(event) {
       }
     }
 
-    console.log(`Detections before NMS: ${boxes.length}`);
     const finalBoxes = nonMaxSuppression(boxes);
-    console.log(`Detections after NMS: ${finalBoxes.length}`);
 
     ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
 
@@ -128,17 +142,19 @@ async function handleImageUpload(event) {
     ctx.font = '16px Arial';
     ctx.fillStyle = 'lime';
 
-    for (const box of finalBoxes) {
+    for (let i = 0; i < finalBoxes.length; i++) {
+      const box = finalBoxes[i];
       const x = (box.x - padX) * scale;
       const y = (box.y - padY) * scale;
       const w = box.w * scale;
       const h = box.h * scale;
-
       const left = x - w / 2;
       const top = y - h / 2;
 
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
+
+      cropAndDownload(img, left, top, w, h, i + 1);
     }
   };
 
