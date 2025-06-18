@@ -1,50 +1,69 @@
 import * as ort from 'onnxruntime-web';
+import EXIF from 'exif-js';
 
 const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
 const ctx = canvas.getContext('2d');
 let session;
 
+// Initialize ONNX model
 async function init() {
   session = await ort.InferenceSession.create('./best.onnx');
   console.log("ONNX model loaded.");
 }
 
 function preprocessImage(image) {
-  const modelSize = 640;
-  const canvasTemp = document.createElement('canvas');
-  const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
+  const width = 640;
+  const height = 640;
 
-  const imgW = image.naturalWidth;
-  const imgH = image.naturalHeight;
-  const scale = Math.min(modelSize / imgW, modelSize / imgH);
-  const resizedW = Math.round(imgW * scale);
-  const resizedH = Math.round(imgH * scale);
+  canvas.width = width;
+  canvas.height = height;
+  ctx.drawImage(image, 0, 0, width, height);
 
-  const padX = Math.floor((modelSize - resizedW) / 2);
-  const padY = Math.floor((modelSize - resizedH) / 2);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const { data } = imageData;
 
-  canvasTemp.width = modelSize;
-  canvasTemp.height = modelSize;
-
-  ctxTemp.fillStyle = 'black';
-  ctxTemp.fillRect(0, 0, modelSize, modelSize);
-  ctxTemp.drawImage(image, padX, padY, resizedW, resizedH);
-
-  const imageData = ctxTemp.getImageData(0, 0, modelSize, modelSize).data;
-  const floatData = new Float32Array(modelSize * modelSize * 3);
-
-  for (let i = 0; i < modelSize * modelSize; i++) {
-    floatData[i] = imageData[i * 4] / 255;
-    floatData[i + modelSize * modelSize] = imageData[i * 4 + 1] / 255;
-    floatData[i + 2 * modelSize * modelSize] = imageData[i * 4 + 2] / 255;
+  const input = new Float32Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    input[i] = data[i * 4] / 255; // R
+    input[i + width * height] = data[i * 4 + 1] / 255; // G
+    input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
   }
 
-  preprocessImage.lastPadX = padX;
-  preprocessImage.lastPadY = padY;
-  preprocessImage.lastScale = scale;
+  return new ort.Tensor('float32', input, [1, 3, height, width]);
+}
 
-  return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
+// Fix orientation using EXIF
+function fixOrientation(image, orientation, callback) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const w = image.width;
+  const h = image.height;
+
+  if ([5,6,7,8].includes(orientation)) {
+    canvas.width = h;
+    canvas.height = w;
+  } else {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  switch (orientation) {
+    case 2: ctx.transform(-1, 0, 0, 1, w, 0); break;
+    case 3: ctx.transform(-1, 0, 0, -1, w, h); break;
+    case 4: ctx.transform(1, 0, 0, -1, 0, h); break;
+    case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+    case 6: ctx.transform(0, 1, -1, 0, h, 0); break;
+    case 7: ctx.transform(0, -1, -1, 0, h, w); break;
+    case 8: ctx.transform(0, -1, 1, 0, 0, w); break;
+    default: ctx.transform(1, 0, 0, 1, 0, 0);
+  }
+
+  ctx.drawImage(image, 0, 0);
+  const correctedImage = new Image();
+  correctedImage.onload = () => callback(correctedImage);
+  correctedImage.src = canvas.toDataURL();
 }
 
 function nonMaxSuppression(boxes, iouThreshold = 0.5) {
@@ -83,82 +102,75 @@ function calculateIoU(a, b) {
   return interArea / (boxAArea + boxBArea - interArea);
 }
 
-function cropAndDownload(image, x, y, w, h, index) {
-  const cropCanvas = document.createElement('canvas');
-  const cropCtx = cropCanvas.getContext('2d');
-  cropCanvas.width = w;
-  cropCanvas.height = h;
-  cropCtx.drawImage(image, x, y, w, h, 0, 0, w, h);
+async function detectAndDraw(img) {
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
 
-  cropCanvas.toBlob(blob => {
-    const link = document.createElement('a');
-    link.download = `crop_${index}.png`;
-    link.href = URL.createObjectURL(blob);
-    link.click();
-    URL.revokeObjectURL(link.href);
-  }, 'image/png');
-}
+  const inputTensor = preprocessImage(img);
+  const feeds = { images: inputTensor };
 
-async function handleImageUpload(event) {
-  const file = event.target.files[0];
-  const img = new Image();
+  const output = await session.run(feeds);
+  const rawData = output[Object.keys(output)[0]].data;
+  const [batch, channels, numDetections] = output[Object.keys(output)[0]].dims;
 
-  img.onload = async () => {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
+  const boxes = [];
 
-    const inputTensor = preprocessImage(img);
-    const feeds = { images: inputTensor };
-    const output = await session.run(feeds);
-    const outputTensor = output[Object.keys(output)[0]];
-    const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
+  for (let i = 0; i < numDetections; i++) {
+    const x = rawData[i];
+    const y = rawData[i + numDetections];
+    const w = rawData[i + 2 * numDetections];
+    const h = rawData[i + 3 * numDetections];
+    const conf = rawData[i + 4 * numDetections];
 
-    const boxes = [];
-
-    for (let i = 0; i < numDetections; i++) {
-      const x = rawData[i];
-      const y = rawData[i + numDetections];
-      const w = rawData[i + 2 * numDetections];
-      const h = rawData[i + 3 * numDetections];
-      const conf = rawData[i + 4 * numDetections];
-
-      if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf });
-      }
+    if (conf > 0.4) {
+      boxes.push({ x, y, w, h, conf });
     }
+  }
 
-    const finalBoxes = nonMaxSuppression(boxes);
+  const finalBoxes = nonMaxSuppression(boxes);
 
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+  // Draw + crop
+  finalBoxes.forEach((box, idx) => {
+    const scaleX = img.width / 640;
+    const scaleY = img.height / 640;
 
-    const scale = 1 / preprocessImage.lastScale;
-    const padX = preprocessImage.lastPadX;
-    const padY = preprocessImage.lastPadY;
+    const left = (box.x - box.w / 2) * scaleX;
+    const top = (box.y - box.h / 2) * scaleY;
+    const width = box.w * scaleX;
+    const height = box.h * scaleY;
 
     ctx.strokeStyle = 'lime';
     ctx.lineWidth = 2;
-    ctx.font = '16px Arial';
-    ctx.fillStyle = 'lime';
+    ctx.strokeRect(left, top, width, height);
 
-    for (let i = 0; i < finalBoxes.length; i++) {
-      const box = finalBoxes[i];
-      const x = (box.x - padX) * scale;
-      const y = (box.y - padY) * scale;
-      const w = box.w * scale;
-      const h = box.h * scale;
-      const left = x - w / 2;
-      const top = y - h / 2;
-
-      ctx.strokeRect(left, top, w, h);
-      ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
-
-      cropAndDownload(img, left, top, w, h, i + 1);
-    }
-  };
-  img.src = URL.createObjectURL(file);
+    // Crop
+    const cropped = document.createElement('canvas');
+    cropped.width = width;
+    cropped.height = height;
+    cropped.getContext('2d').drawImage(canvas, left, top, width, height, 0, 0, width, height);
+    document.body.appendChild(cropped); // For demo; can also upload or save
+  });
 }
 
+imageInput.addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      EXIF.getData(img, function () {
+        const orientation = EXIF.getTag(this, "Orientation") || 1;
+        fixOrientation(img, orientation, corrected => {
+          detectAndDraw(corrected);
+        });
+      });
+    };
+    img.src = reader.result;
+  };
+
+  reader.readAsDataURL(file);
+});
+
 document.addEventListener('DOMContentLoaded', init);
-imageInput.addEventListener('change', handleImageUpload);
