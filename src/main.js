@@ -132,21 +132,29 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function autoRotateAndDetectBest(originalImage) {
-  const angles = [0, 90, 180, 270];
-  let best = { angle: 0, boxes: [], image: originalImage };
+async function correctImageOrientation(image) {
+  const isHorizontal = image.naturalWidth >= image.naturalHeight;
 
-  for (let angle of angles) {
-    const rotated = angle === 0 ? originalImage : await rotateImage(originalImage, angle);
-    const boxes = await runDetection(rotated);
-    const confidenceSum = boxes.reduce((sum, b) => sum + b.conf, 0);
+  const inputTensor = preprocessImageForOrientation(image);
+  const feeds = { x: inputTensor };
+  const output = await orientSession.run(feeds);
+  const scores = output[Object.keys(output)[0]].data;
 
-    if (boxes.length > best.boxes.length || confidenceSum > best.boxes.reduce((s, b) => s + b.conf, 0)) {
-      best = { angle, boxes, image: rotated };
-    }
+  // Get index of highest probability
+  const maxIndex = scores.indexOf(Math.max(...scores));
+  const degreeMap = [0, 180, 270, 90];
+
+  // If image is horizontal, only consider 0 (normal) or 180 (upside down)
+  if (isHorizontal) {
+    if (maxIndex === 0) return image;
+    if (maxIndex === 1) return await rotateImage(image, 180);
+    return image; // Skip 90/270 rotations
+  } else {
+    // Use full rotation map for portrait image
+    const degree = degreeMap[maxIndex];
+    if (degree === 0) return image;
+    return await rotateImage(image, degree);
   }
-
-  return best;
 }
 
 async function handleImageUpload(event) {
