@@ -3,11 +3,12 @@ import * as ort from 'onnxruntime-web';
 const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
 const ctx = canvas.getContext('2d');
-let detectSession;
+let detectSession, orientSession;
 
 async function init() {
   detectSession = await ort.InferenceSession.create('./best.onnx');
-  console.log("✅ Detection model loaded.");
+  orientSession = await ort.InferenceSession.create('./orientation.onnx'); // Change this to your correct filename
+  console.log("✅ Both detection and orientation models loaded.");
 }
 
 function preprocessImageForDetection(image) {
@@ -32,7 +33,6 @@ function preprocessImageForDetection(image) {
 
   const imageData = ctxTemp.getImageData(0, 0, modelSize, modelSize).data;
   const floatData = new Float32Array(modelSize * modelSize * 3);
-
   for (let i = 0; i < modelSize * modelSize; i++) {
     floatData[i] = imageData[i * 4] / 255;
     floatData[i + modelSize * modelSize] = imageData[i * 4 + 1] / 255;
@@ -44,6 +44,24 @@ function preprocessImageForDetection(image) {
   preprocessImageForDetection.lastScale = scale;
 
   return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
+}
+
+function preprocessImageForOrientation(image) {
+  const canvasTemp = document.createElement('canvas');
+  const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
+  canvasTemp.width = 192;
+  canvasTemp.height = 48;
+  ctxTemp.drawImage(image, 0, 0, 192, 48);
+
+  const imageData = ctxTemp.getImageData(0, 0, 192, 48).data;
+  const floatData = new Float32Array(3 * 48 * 192);
+  for (let i = 0; i < 192 * 48; i++) {
+    floatData[i] = imageData[i * 4] / 255;
+    floatData[i + 192 * 48] = imageData[i * 4 + 1] / 255;
+    floatData[i + 2 * 192 * 48] = imageData[i * 4 + 2] / 255;
+  }
+
+  return new ort.Tensor('float32', floatData, [1, 3, 48, 192]);
 }
 
 function rotateImage(image, degrees) {
@@ -66,6 +84,26 @@ function rotateImage(image, degrees) {
   });
 }
 
+async function correctImageOrientation(image) {
+  const isHorizontal = image.naturalWidth >= image.naturalHeight;
+
+  const inputTensor = preprocessImageForOrientation(image);
+  const feeds = { x: inputTensor };
+  const output = await orientSession.run(feeds);
+  const scores = output[Object.keys(output)[0]].data;
+  const maxIndex = scores.indexOf(Math.max(...scores));
+  const degreeMap = [0, 180, 270, 90];
+
+  if (isHorizontal) {
+    if (maxIndex === 0) return image;
+    if (maxIndex === 1) return await rotateImage(image, 180);
+    return image;
+  } else {
+    const degree = degreeMap[maxIndex];
+    return degree === 0 ? image : await rotateImage(image, degree);
+  }
+}
+
 async function runDetection(image) {
   const inputTensor = preprocessImageForDetection(image);
   const feeds = { images: inputTensor };
@@ -85,7 +123,6 @@ async function runDetection(image) {
       boxes.push({ x, y, w, h, conf });
     }
   }
-
   return boxes;
 }
 
@@ -132,43 +169,19 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function correctImageOrientation(image) {
-  const isHorizontal = image.naturalWidth >= image.naturalHeight;
-
-  const inputTensor = preprocessImageForOrientation(image);
-  const feeds = { x: inputTensor };
-  const output = await orientSession.run(feeds);
-  const scores = output[Object.keys(output)[0]].data;
-
-  // Get index of highest probability
-  const maxIndex = scores.indexOf(Math.max(...scores));
-  const degreeMap = [0, 180, 270, 90];
-
-  // If image is horizontal, only consider 0 (normal) or 180 (upside down)
-  if (isHorizontal) {
-    if (maxIndex === 0) return image;
-    if (maxIndex === 1) return await rotateImage(image, 180);
-    return image; // Skip 90/270 rotations
-  } else {
-    // Use full rotation map for portrait image
-    const degree = degreeMap[maxIndex];
-    if (degree === 0) return image;
-    return await rotateImage(image, degree);
-  }
-}
-
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
   img.src = URL.createObjectURL(file);
 
   img.onload = async () => {
-    console.log('📷 Image loaded. Running detection...');
-    const { image: bestImage, boxes } = await autoRotateAndDetectBest(img);
+    console.log('📷 Image loaded');
+    const corrected = await correctImageOrientation(img);
+    const boxes = await runDetection(corrected);
 
-    canvas.width = bestImage.naturalWidth;
-    canvas.height = bestImage.naturalHeight;
-    ctx.drawImage(bestImage, 0, 0);
+    canvas.width = corrected.naturalWidth;
+    canvas.height = corrected.naturalHeight;
+    ctx.drawImage(corrected, 0, 0);
 
     const finalBoxes = nonMaxSuppression(boxes);
     const scale = 1 / preprocessImageForDetection.lastScale;
@@ -191,7 +204,7 @@ async function handleImageUpload(event) {
 
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
-      cropAndDownload(bestImage, left, top, w, h, i + 1);
+      cropAndDownload(corrected, left, top, w, h, i + 1);
     }
   };
 }
