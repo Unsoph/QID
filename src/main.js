@@ -11,36 +11,41 @@ async function init() {
 }
 
 function rotateIfVertical(image) {
-  if (image.naturalHeight > image.naturalWidth) {
-    const canvasTemp = document.createElement('canvas');
-    const ctxTemp = canvasTemp.getContext('2d');
-    canvasTemp.width = image.naturalHeight;
-    canvasTemp.height = image.naturalWidth;
+  return new Promise(resolve => {
+    if (image.naturalHeight > image.naturalWidth) {
+      const canvasTemp = document.createElement('canvas');
+      const ctxTemp = canvasTemp.getContext('2d');
+      canvasTemp.width = image.naturalHeight;
+      canvasTemp.height = image.naturalWidth;
 
-    ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
-    ctxTemp.rotate(-Math.PI / 2);
-    ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+      ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
+      ctxTemp.rotate(-Math.PI / 2);
+      ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
 
-    const rotatedImage = new Image();
-    rotatedImage.src = canvasTemp.toDataURL();
-    return rotatedImage;
-  }
-  return image;
+      const rotatedImage = new Image();
+      rotatedImage.onload = () => resolve(rotatedImage);
+      rotatedImage.src = canvasTemp.toDataURL();
+    } else {
+      resolve(image);
+    }
+  });
 }
 
 function rotate180(image) {
-  const canvasTemp = document.createElement('canvas');
-  const ctxTemp = canvasTemp.getContext('2d');
-  canvasTemp.width = image.naturalWidth;
-  canvasTemp.height = image.naturalHeight;
+  return new Promise(resolve => {
+    const canvasTemp = document.createElement('canvas');
+    const ctxTemp = canvasTemp.getContext('2d');
+    canvasTemp.width = image.naturalWidth;
+    canvasTemp.height = image.naturalHeight;
 
-  ctxTemp.translate(canvasTemp.width, canvasTemp.height);
-  ctxTemp.rotate(Math.PI);
-  ctxTemp.drawImage(image, 0, 0);
+    ctxTemp.translate(canvasTemp.width, canvasTemp.height);
+    ctxTemp.rotate(Math.PI);
+    ctxTemp.drawImage(image, 0, 0);
 
-  const rotatedImage = new Image();
-  rotatedImage.src = canvasTemp.toDataURL();
-  return rotatedImage;
+    const rotatedImage = new Image();
+    rotatedImage.onload = () => resolve(rotatedImage);
+    rotatedImage.src = canvasTemp.toDataURL();
+  });
 }
 
 function preprocessImage(image) {
