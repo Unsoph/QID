@@ -152,24 +152,19 @@ async function detectWithBestOrientation(image) {
     const output = await session.run(feeds);
     const outputTensor = output[Object.keys(output)[0]];
     const rawData = outputTensor.data;
-    const [batchSize, numDetections, valuesPerDetection] = outputTensor.dims;
-
-    console.log("Output tensor dims:", outputTensor.dims);
-    console.log("First few values:", rawData.slice(0, 10));
+    const [batch, channels, numDetections] = outputTensor.dims;
 
     const boxes = [];
 
     for (let i = 0; i < numDetections; i++) {
-      const offset = i * valuesPerDetection;
-      const x = rawData[offset];
-      const y = rawData[offset + 1];
-      const w = rawData[offset + 2];
-      const h = rawData[offset + 3];
-      const conf = rawData[offset + 4];
-      const classId = rawData[offset + 5];
+      const x = rawData[i];
+      const y = rawData[i + numDetections];
+      const w = rawData[i + 2 * numDetections];
+      const h = rawData[i + 3 * numDetections];
+      const conf = rawData[i + 4 * numDetections];
 
       if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf, classId });
+        boxes.push({ x, y, w, h, conf });
       }
     }
 
