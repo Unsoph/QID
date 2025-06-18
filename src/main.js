@@ -134,14 +134,18 @@ async function detectWithBestOrientation(image) {
   let bestImage = null;
   let bestConf = -Infinity;
 
-  for (const testImg of candidates) {
+  for (const [index, testImg] of candidates.entries()) {
     await new Promise(res => {
+      if (testImg.complete) return res();
       testImg.onload = () => res();
     });
+
+    console.log(`🌀 Testing orientation ${index + 1}`);
 
     let inputTensor;
     try {
       inputTensor = preprocessImage(testImg);
+      console.log(`✅ Preprocessing succeeded`);
     } catch (err) {
       console.error("❌ Error during image preprocessing:", err);
       continue;
@@ -151,14 +155,28 @@ async function detectWithBestOrientation(image) {
     try {
       const feeds = { images: inputTensor };
       output = await session.run(feeds);
+      console.log(`✅ Inference succeeded`);
     } catch (err) {
       console.error("❌ Error during inference:", err);
       continue;
     }
 
-    const outputTensor = output[Object.keys(output)[0]];
+    const outputKey = Object.keys(output)[0];
+    const outputTensor = output[outputKey];
+    console.log(`📦 Output tensor dims:`, outputTensor.dims);
+
+    if (!outputTensor || !outputTensor.data || outputTensor.data.length === 0) {
+      console.warn("⚠️ Empty output tensor.");
+      continue;
+    }
+
     const rawData = outputTensor.data;
     const [batch, channels, numDetections] = outputTensor.dims;
+
+    if (!numDetections || rawData.length < 5 * numDetections) {
+      console.warn("⚠️ Not enough output data");
+      continue;
+    }
 
     const boxes = [];
     for (let i = 0; i < numDetections; i++) {
@@ -175,6 +193,7 @@ async function detectWithBestOrientation(image) {
 
     const finalBoxes = nonMaxSuppression(boxes);
     const topConf = finalBoxes.length > 0 ? finalBoxes[0].conf : 0;
+    console.log(`🎯 Orientation ${index + 1} detections:`, finalBoxes.length);
 
     if (topConf > bestConf) {
       bestConf = topConf;
