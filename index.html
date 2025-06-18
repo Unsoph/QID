@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aadhaar Card Detector</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       font-family: sans-serif;
@@ -18,25 +22,34 @@
 
     h1 {
       text-align: center;
-      font-size: 1.5rem;
+      font-size: 2rem;
+      margin-bottom: 1rem;
     }
 
     input[type="file"] {
       margin: 1rem 0;
+      background-color: #00ff88;
+      color: #121212;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 5px;
+      cursor: pointer;
     }
 
     canvas {
       max-width: 100%;
       height: auto;
+      margin-top: 1rem;
       border: 2px solid #00ff88;
       border-radius: 8px;
     }
 
     .note {
       font-size: 0.9rem;
-      opacity: 0.8;
+      opacity: 0.75;
       text-align: center;
       margin-top: 1rem;
+      max-width: 80%;
     }
   </style>
 </head>
@@ -44,7 +57,9 @@
   <h1>Aadhaar Card Detector</h1>
   <input type="file" id="image-input" accept="image/*" />
   <canvas id="output-canvas"></canvas>
-  <p class="note">Detected Aadhaar cards will be downloaded automatically.</p>
+  <p class="note">Detected Aadhaar cards will be cropped, fixed for orientation, and downloaded automatically.</p>
+
+  <!-- Ensure this path is correct to your JS entry -->
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

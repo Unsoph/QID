@@ -1,176 +1,164 @@
 import * as ort from 'onnxruntime-web';
-import EXIF from 'exif-js';
+import * as EXIF from 'exif-js';
 
-const imageInput = document.getElementById('image-input');
-const canvas = document.getElementById('output-canvas');
-const ctx = canvas.getContext('2d');
+// Load YOLOv8 ONNX model
+const modelPath = 'model.onnx'; // adjust if in a subfolder
+
 let session;
 
-// Initialize ONNX model
-async function init() {
-  session = await ort.InferenceSession.create('./best.onnx');
-  console.log("ONNX model loaded.");
+async function loadModel() {
+  session = await ort.InferenceSession.create(modelPath);
 }
+loadModel();
 
-function preprocessImage(image) {
-  const width = 640;
-  const height = 640;
+document.getElementById('image-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-  canvas.width = width;
-  canvas.height = height;
-  ctx.drawImage(image, 0, 0, width, height);
+  const img = new Image();
+  img.onload = () => {
+    EXIF.getData(file, function () {
+      const orientation = EXIF.getTag(this, 'Orientation');
+      fixOrientation(img, orientation, (orientedImg) => {
+        detectAndCrop(orientedImg);
+      });
+    });
+  };
+  img.src = URL.createObjectURL(file);
+});
 
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const { data } = imageData;
-
-  const input = new Float32Array(width * height * 3);
-  for (let i = 0; i < width * height; i++) {
-    input[i] = data[i * 4] / 255; // R
-    input[i + width * height] = data[i * 4 + 1] / 255; // G
-    input[i + 2 * width * height] = data[i * 4 + 2] / 255; // B
+function fixOrientation(img, orientation, callback) {
+  if (!orientation || orientation === 1) {
+    callback(img);
+    return;
   }
 
-  return new ort.Tensor('float32', input, [1, 3, height, width]);
-}
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const width = img.width;
+  const height = img.height;
 
-// Fix orientation using EXIF
-function fixOrientation(image, orientation, callback) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  const w = image.width;
-  const h = image.height;
-
-  if ([5,6,7,8].includes(orientation)) {
-    canvas.width = h;
-    canvas.height = w;
+  if (orientation > 4) {
+    canvas.width = height;
+    canvas.height = width;
   } else {
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = width;
+    canvas.height = height;
   }
 
   switch (orientation) {
-    case 2: ctx.transform(-1, 0, 0, 1, w, 0); break;
-    case 3: ctx.transform(-1, 0, 0, -1, w, h); break;
-    case 4: ctx.transform(1, 0, 0, -1, 0, h); break;
+    case 2: ctx.transform(-1, 0, 0, 1, width, 0); break;
+    case 3: ctx.transform(-1, 0, 0, -1, width, height); break;
+    case 4: ctx.transform(1, 0, 0, -1, 0, height); break;
     case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
-    case 6: ctx.transform(0, 1, -1, 0, h, 0); break;
-    case 7: ctx.transform(0, -1, -1, 0, h, w); break;
-    case 8: ctx.transform(0, -1, 1, 0, 0, w); break;
-    default: ctx.transform(1, 0, 0, 1, 0, 0);
+    case 6: ctx.transform(0, 1, -1, 0, height, 0); break;
+    case 7: ctx.transform(0, -1, -1, 0, height, width); break;
+    case 8: ctx.transform(0, -1, 1, 0, 0, width); break;
+    default: break;
   }
 
-  ctx.drawImage(image, 0, 0);
-  const correctedImage = new Image();
-  correctedImage.onload = () => callback(correctedImage);
-  correctedImage.src = canvas.toDataURL();
-}
-
-function nonMaxSuppression(boxes, iouThreshold = 0.5) {
-  boxes.sort((a, b) => b.conf - a.conf);
-  const selected = [];
-
-  for (let i = 0; i < boxes.length; i++) {
-    const a = boxes[i];
-    let keep = true;
-
-    for (let j = 0; j < selected.length; j++) {
-      const b = selected[j];
-      const iou = calculateIoU(a, b);
-      if (iou > iouThreshold) {
-        keep = false;
-        break;
-      }
-    }
-
-    if (keep) selected.push(a);
-  }
-
-  return selected;
-}
-
-function calculateIoU(a, b) {
-  const x1 = Math.max(a.x - a.w / 2, b.x - b.w / 2);
-  const y1 = Math.max(a.y - a.h / 2, b.y - b.h / 2);
-  const x2 = Math.min(a.x + a.w / 2, b.x + b.w / 2);
-  const y2 = Math.min(a.y + a.h / 2, b.y + b.h / 2);
-
-  const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-  const boxAArea = a.w * a.h;
-  const boxBArea = b.w * b.h;
-
-  return interArea / (boxAArea + boxBArea - interArea);
-}
-
-async function detectAndDraw(img) {
-  canvas.width = img.width;
-  canvas.height = img.height;
   ctx.drawImage(img, 0, 0);
 
-  const inputTensor = preprocessImage(img);
+  const newImg = new Image();
+  newImg.onload = () => callback(newImg);
+  newImg.src = canvas.toDataURL();
+}
+
+async function detectAndCrop(image) {
+  const canvas = document.getElementById('output-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0);
+
+  // Preprocess image into tensor
+  const inputTensor = await preprocess(image);
+
   const feeds = { images: inputTensor };
+  const results = await session.run(feeds);
 
-  const output = await session.run(feeds);
-  const rawData = output[Object.keys(output)[0]].data;
-  const [batch, channels, numDetections] = output[Object.keys(output)[0]].dims;
+  const output = results[Object.keys(results)[0]].data;
 
-  const boxes = [];
+  // Parse YOLOv8 output
+  const boxes = parseDetections(output, canvas.width, canvas.height);
 
-  for (let i = 0; i < numDetections; i++) {
-    const x = rawData[i];
-    const y = rawData[i + numDetections];
-    const w = rawData[i + 2 * numDetections];
-    const h = rawData[i + 3 * numDetections];
-    const conf = rawData[i + 4 * numDetections];
+  boxes.forEach((box, i) => {
+    const [x1, y1, x2, y2, conf] = box;
 
-    if (conf > 0.4) {
-      boxes.push({ x, y, w, h, conf });
-    }
-  }
-
-  const finalBoxes = nonMaxSuppression(boxes);
-
-  // Draw + crop
-  finalBoxes.forEach((box, idx) => {
-    const scaleX = img.width / 640;
-    const scaleY = img.height / 640;
-
-    const left = (box.x - box.w / 2) * scaleX;
-    const top = (box.y - box.h / 2) * scaleY;
-    const width = box.w * scaleX;
-    const height = box.h * scaleY;
-
-    ctx.strokeStyle = 'lime';
+    // Draw box
+    ctx.strokeStyle = '#00FF00';
     ctx.lineWidth = 2;
-    ctx.strokeRect(left, top, width, height);
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
-    // Crop
-    const cropped = document.createElement('canvas');
-    cropped.width = width;
-    cropped.height = height;
-    cropped.getContext('2d').drawImage(canvas, left, top, width, height, 0, 0, width, height);
-    document.body.appendChild(cropped); // For demo; can also upload or save
+    // Crop and download
+    cropAndDownload(image, box, i);
   });
 }
 
-imageInput.addEventListener('change', (event) => {
-  const file = event.target.files[0];
-  const reader = new FileReader();
+async function preprocess(image) {
+  const modelWidth = 640;
+  const modelHeight = 640;
 
-  reader.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      EXIF.getData(img, function () {
-        const orientation = EXIF.getTag(this, "Orientation") || 1;
-        fixOrientation(img, orientation, corrected => {
-          detectAndDraw(corrected);
-        });
-      });
-    };
-    img.src = reader.result;
-  };
+  const offscreenCanvas = document.createElement('canvas');
+  offscreenCanvas.width = modelWidth;
+  offscreenCanvas.height = modelHeight;
+  const ctx = offscreenCanvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, modelWidth, modelHeight);
 
-  reader.readAsDataURL(file);
-});
+  const imageData = ctx.getImageData(0, 0, modelWidth, modelHeight);
+  const { data } = imageData;
 
-document.addEventListener('DOMContentLoaded', init);
+  const float32Data = new Float32Array(modelWidth * modelHeight * 3);
+  for (let i = 0; i < modelWidth * modelHeight; i++) {
+    float32Data[i] = data[i * 4] / 255;       // R
+    float32Data[i + modelWidth * modelHeight] = data[i * 4 + 1] / 255; // G
+    float32Data[i + 2 * modelWidth * modelHeight] = data[i * 4 + 2] / 255; // B
+  }
+
+  return new ort.Tensor('float32', float32Data, [1, 3, modelHeight, modelWidth]);
+}
+
+function parseDetections(output, width, height, confThreshold = 0.25) {
+  const boxes = [];
+
+  const numDetections = output.length / 6; // YOLOv8 gives [x1, y1, x2, y2, conf, class]
+  for (let i = 0; i < numDetections; i++) {
+    const x1 = output[i * 6];
+    const y1 = output[i * 6 + 1];
+    const x2 = output[i * 6 + 2];
+    const y2 = output[i * 6 + 3];
+    const conf = output[i * 6 + 4];
+    const cls = output[i * 6 + 5];
+
+    if (conf > confThreshold) {
+      // Rescale from model (640x640) to original image size
+      boxes.push([x1 * width / 640, y1 * height / 640, x2 * width / 640, y2 * height / 640, conf, cls]);
+    }
+  }
+
+  return boxes;
+}
+
+function cropAndDownload(image, box, index) {
+  const [x1, y1, x2, y2] = box;
+
+  const cropWidth = x2 - x1;
+  const cropHeight = y2 - y1;
+
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = cropWidth;
+  cropCanvas.height = cropHeight;
+
+  const ctx = cropCanvas.getContext('2d');
+  ctx.drawImage(image, x1, y1, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+  cropCanvas.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `aadhaar_crop_${index + 1}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, 'image/jpeg');
+}
