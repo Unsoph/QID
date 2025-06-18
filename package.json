@@ -12,6 +12,7 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
+    "exif-js": "^2.3.0",
     "onnxruntime-web": "^1.22.0"
   }
 }
