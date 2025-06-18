@@ -10,37 +10,17 @@ async function init() {
   console.log("✅ ONNX model loaded.");
 }
 
-function rotateIfVertical(image) {
-  return new Promise(resolve => {
-    if (image.naturalHeight > image.naturalWidth) {
-      const canvasTemp = document.createElement('canvas');
-      const ctxTemp = canvasTemp.getContext('2d');
-      canvasTemp.width = image.naturalHeight;
-      canvasTemp.height = image.naturalWidth;
-
-      ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
-      ctxTemp.rotate(-Math.PI / 2);
-      ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
-
-      const rotatedImage = new Image();
-      rotatedImage.onload = () => resolve(rotatedImage);
-      rotatedImage.src = canvasTemp.toDataURL();
-    } else {
-      resolve(image);
-    }
-  });
-}
-
-function rotate180(image) {
+function rotateImage(image, angle) {
   return new Promise(resolve => {
     const canvasTemp = document.createElement('canvas');
     const ctxTemp = canvasTemp.getContext('2d');
-    canvasTemp.width = image.naturalWidth;
-    canvasTemp.height = image.naturalHeight;
+    const is90or270 = angle % 180 !== 0;
+    canvasTemp.width = is90or270 ? image.naturalHeight : image.naturalWidth;
+    canvasTemp.height = is90or270 ? image.naturalWidth : image.naturalHeight;
 
-    ctxTemp.translate(canvasTemp.width, canvasTemp.height);
-    ctxTemp.rotate(Math.PI);
-    ctxTemp.drawImage(image, 0, 0);
+    ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
+    ctxTemp.rotate(angle * Math.PI / 180);
+    ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
 
     const rotatedImage = new Image();
     rotatedImage.onload = () => resolve(rotatedImage);
@@ -132,9 +112,8 @@ function cropAndDownload(image, x, y, w, h, index) {
 }
 
 async function detectWithBestOrientation(image) {
-  const rotated = await rotateIfVertical(image);
-  const rotated180 = await rotate180(rotated);
-  const candidates = [rotated, rotated180];
+  const angles = [0, 90, 180, 270];
+  const candidates = await Promise.all(angles.map(angle => rotateImage(image, angle)));
 
   let bestBoxes = [];
   let bestImage = null;
@@ -142,7 +121,7 @@ async function detectWithBestOrientation(image) {
 
   for (let i = 0; i < candidates.length; i++) {
     const testImg = candidates[i];
-    console.log(`🌀 Testing orientation ${i + 1}`);
+    console.log(`🌀 Testing orientation ${angles[i]}°`);
 
     await new Promise(resolve => {
       if (testImg.complete) resolve();
@@ -151,26 +130,21 @@ async function detectWithBestOrientation(image) {
 
     try {
       const inputTensor = preprocessImage(testImg);
-      console.log('✅ Preprocessing succeeded');
-
       const feeds = { images: inputTensor };
       const output = await session.run(feeds);
-      console.log('✅ Inference succeeded');
 
       const outputTensor = output[Object.keys(output)[0]];
-      console.log('📦 Output tensor dims:', outputTensor.dims);
-
       const rawData = outputTensor.data;
       const [batch, channels, numDetections] = outputTensor.dims;
 
       const boxes = [];
 
-      for (let i = 0; i < numDetections; i++) {
-        const x = rawData[i];
-        const y = rawData[i + numDetections];
-        const w = rawData[i + 2 * numDetections];
-        const h = rawData[i + 3 * numDetections];
-        const conf = rawData[i + 4 * numDetections];
+      for (let j = 0; j < numDetections; j++) {
+        const x = rawData[j];
+        const y = rawData[j + numDetections];
+        const w = rawData[j + 2 * numDetections];
+        const h = rawData[j + 3 * numDetections];
+        const conf = rawData[j + 4 * numDetections];
 
         if (conf > 0.4) {
           boxes.push({ x, y, w, h, conf });
@@ -178,20 +152,20 @@ async function detectWithBestOrientation(image) {
       }
 
       const finalBoxes = nonMaxSuppression(boxes);
-      console.log(`🎯 Orientation ${i + 1} detections: ${finalBoxes.length}`);
-
       const topConf = finalBoxes.length > 0 ? finalBoxes[0].conf : 0;
+
+      console.log(`🎯 Orientation ${angles[i]}° detections: ${finalBoxes.length}`);
+
       if (topConf > bestConf) {
         bestConf = topConf;
         bestBoxes = finalBoxes;
         bestImage = testImg;
       }
     } catch (err) {
-      console.error('❌ Error during image preprocessing:', err);
+      console.error('❌ Error in detection:', err);
     }
   }
 
-  console.log('✅ Detection complete', bestBoxes);
   return { boxes: bestBoxes, image: bestImage };
 }
 
