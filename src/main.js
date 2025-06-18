@@ -150,12 +150,14 @@ async function handleImageUpload(event) {
   original.src = URL.createObjectURL(file);
 
   original.onload = async () => {
-    const angles = [0, 90, 180, 270];
+    const isVertical = original.naturalHeight > original.naturalWidth;
+    const angleCandidates = isVertical ? [270, 0] : [0, 180];
+
     let bestBoxes = [];
     let bestImg = original;
     let bestAngle = 0;
 
-    for (let angle of angles) {
+    for (let angle of angleCandidates) {
       const rotated = angle === 0 ? original : await new Promise(resolve => {
         const r = rotateImage(original, angle);
         r.onload = () => resolve(r);
@@ -169,7 +171,7 @@ async function handleImageUpload(event) {
       }
     }
 
-    console.log(`Best angle: ${bestAngle}°, Confidence: ${bestBoxes[0]?.conf.toFixed(2) || "None"}`);
+    console.log(`Best horizontal orientation: ${bestAngle}°, Conf: ${bestBoxes[0]?.conf.toFixed(2) || "None"}`);
 
     canvas.width = bestImg.naturalWidth;
     canvas.height = bestImg.naturalHeight;
