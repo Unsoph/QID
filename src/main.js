@@ -7,7 +7,7 @@ let session;
 
 async function init() {
   session = await ort.InferenceSession.create('/best.onnx');
-  console.log("ONNX model loaded.");
+  console.log("✅ ONNX model loaded.");
 }
 
 function rotateIfVertical(image) {
@@ -59,7 +59,6 @@ function preprocessImage(image) {
 
   canvasTemp.width = modelSize;
   canvasTemp.height = modelSize;
-
   ctxTemp.fillStyle = 'black';
   ctxTemp.fillRect(0, 0, modelSize, modelSize);
   ctxTemp.drawImage(image, padX, padY, resizedW, resizedH);
@@ -84,22 +83,17 @@ function nonMaxSuppression(boxes, iouThreshold = 0.5) {
   boxes.sort((a, b) => b.conf - a.conf);
   const selected = [];
 
-  for (let i = 0; i < boxes.length; i++) {
-    const a = boxes[i];
+  for (const a of boxes) {
     let keep = true;
-
-    for (let j = 0; j < selected.length; j++) {
-      const b = selected[j];
+    for (const b of selected) {
       const iou = calculateIoU(a, b);
       if (iou > iouThreshold) {
         keep = false;
         break;
       }
     }
-
     if (keep) selected.push(a);
   }
-
   return selected;
 }
 
@@ -142,20 +136,31 @@ async function detectWithBestOrientation(image) {
 
   for (const testImg of candidates) {
     await new Promise(res => {
-      testImg.onload = () => {
-        res();
-      };
+      testImg.onload = () => res();
     });
 
-    const inputTensor = preprocessImage(testImg);
-    const feeds = { images: inputTensor };
-    const output = await session.run(feeds);
+    let inputTensor;
+    try {
+      inputTensor = preprocessImage(testImg);
+    } catch (err) {
+      console.error("❌ Error during image preprocessing:", err);
+      continue;
+    }
+
+    let output;
+    try {
+      const feeds = { images: inputTensor };
+      output = await session.run(feeds);
+    } catch (err) {
+      console.error("❌ Error during inference:", err);
+      continue;
+    }
+
     const outputTensor = output[Object.keys(output)[0]];
     const rawData = outputTensor.data;
     const [batch, channels, numDetections] = outputTensor.dims;
 
     const boxes = [];
-
     for (let i = 0; i < numDetections; i++) {
       const x = rawData[i];
       const y = rawData[i + numDetections];
@@ -187,9 +192,9 @@ async function handleImageUpload(event) {
   img.src = URL.createObjectURL(file);
 
   img.onload = async () => {
-    console.log("Image loaded, running detection...");
+    console.log("📷 Image loaded, running detection...");
     const { boxes, image } = await detectWithBestOrientation(img);
-    console.log("Detection complete", boxes);
+    console.log("✅ Detection complete", boxes);
 
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
@@ -215,7 +220,6 @@ async function handleImageUpload(event) {
 
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
-
       cropAndDownload(image, left, top, w, h, i + 1);
     }
   };
