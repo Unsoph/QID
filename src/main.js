@@ -132,81 +132,66 @@ function cropAndDownload(image, x, y, w, h, index) {
 }
 
 async function detectWithBestOrientation(image) {
-  const rotated = rotateIfVertical(image);
-  const candidates = [rotated, rotate180(rotated)];
+  const rotated = await rotateIfVertical(image);
+  const rotated180 = await rotate180(rotated);
+  const candidates = [rotated, rotated180];
 
   let bestBoxes = [];
   let bestImage = null;
   let bestConf = -Infinity;
 
-  for (const [index, testImg] of candidates.entries()) {
-    await new Promise(res => {
-      if (testImg.complete) return res();
-      testImg.onload = () => res();
+  for (let i = 0; i < candidates.length; i++) {
+    const testImg = candidates[i];
+    console.log(`🌀 Testing orientation ${i + 1}`);
+
+    await new Promise(resolve => {
+      if (testImg.complete) resolve();
+      else testImg.onload = () => resolve();
     });
 
-    console.log(`🌀 Testing orientation ${index + 1}`);
-
-    let inputTensor;
     try {
-      inputTensor = preprocessImage(testImg);
-      console.log(`✅ Preprocessing succeeded`);
-    } catch (err) {
-      console.error("❌ Error during image preprocessing:", err);
-      continue;
-    }
+      const inputTensor = preprocessImage(testImg);
+      console.log('✅ Preprocessing succeeded');
 
-    let output;
-    try {
       const feeds = { images: inputTensor };
-      output = await session.run(feeds);
-      console.log(`✅ Inference succeeded`);
-    } catch (err) {
-      console.error("❌ Error during inference:", err);
-      continue;
-    }
+      const output = await session.run(feeds);
+      console.log('✅ Inference succeeded');
 
-    const outputKey = Object.keys(output)[0];
-    const outputTensor = output[outputKey];
-    console.log(`📦 Output tensor dims:`, outputTensor.dims);
+      const outputTensor = output[Object.keys(output)[0]];
+      console.log('📦 Output tensor dims:', outputTensor.dims);
 
-    if (!outputTensor || !outputTensor.data || outputTensor.data.length === 0) {
-      console.warn("⚠️ Empty output tensor.");
-      continue;
-    }
+      const rawData = outputTensor.data;
+      const [batch, channels, numDetections] = outputTensor.dims;
 
-    const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
+      const boxes = [];
 
-    if (!numDetections || rawData.length < 5 * numDetections) {
-      console.warn("⚠️ Not enough output data");
-      continue;
-    }
+      for (let i = 0; i < numDetections; i++) {
+        const x = rawData[i];
+        const y = rawData[i + numDetections];
+        const w = rawData[i + 2 * numDetections];
+        const h = rawData[i + 3 * numDetections];
+        const conf = rawData[i + 4 * numDetections];
 
-    const boxes = [];
-    for (let i = 0; i < numDetections; i++) {
-      const x = rawData[i];
-      const y = rawData[i + numDetections];
-      const w = rawData[i + 2 * numDetections];
-      const h = rawData[i + 3 * numDetections];
-      const conf = rawData[i + 4 * numDetections];
-
-      if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf });
+        if (conf > 0.4) {
+          boxes.push({ x, y, w, h, conf });
+        }
       }
-    }
 
-    const finalBoxes = nonMaxSuppression(boxes);
-    const topConf = finalBoxes.length > 0 ? finalBoxes[0].conf : 0;
-    console.log(`🎯 Orientation ${index + 1} detections:`, finalBoxes.length);
+      const finalBoxes = nonMaxSuppression(boxes);
+      console.log(`🎯 Orientation ${i + 1} detections: ${finalBoxes.length}`);
 
-    if (topConf > bestConf) {
-      bestConf = topConf;
-      bestBoxes = finalBoxes;
-      bestImage = testImg;
+      const topConf = finalBoxes.length > 0 ? finalBoxes[0].conf : 0;
+      if (topConf > bestConf) {
+        bestConf = topConf;
+        bestBoxes = finalBoxes;
+        bestImage = testImg;
+      }
+    } catch (err) {
+      console.error('❌ Error during image preprocessing:', err);
     }
   }
 
+  console.log('✅ Detection complete', bestBoxes);
   return { boxes: bestBoxes, image: bestImage };
 }
 
