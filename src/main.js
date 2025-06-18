@@ -6,7 +6,7 @@ const ctx = canvas.getContext('2d');
 let session;
 
 async function init() {
-  session = await ort.InferenceSession.create('./best.onnx');
+  session = await ort.InferenceSession.create('/best.onnx');
   console.log("ONNX model loaded.");
 }
 
