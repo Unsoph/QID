@@ -22,7 +22,6 @@ function rotateIfVertical(image) {
     ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
 
     const rotatedImage = new Image();
-    rotatedImage.crossOrigin = 'anonymous';
     rotatedImage.src = canvasTemp.toDataURL();
     return rotatedImage;
   }
@@ -40,7 +39,6 @@ function rotate180(image) {
   ctxTemp.drawImage(image, 0, 0);
 
   const rotatedImage = new Image();
-  rotatedImage.crossOrigin = 'anonymous';
   rotatedImage.src = canvasTemp.toDataURL();
   return rotatedImage;
 }
@@ -134,8 +132,8 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function detectWithBestOrientation(originalImage) {
-  const rotated = rotateIfVertical(originalImage);
+async function detectWithBestOrientation(image) {
+  const rotated = rotateIfVertical(image);
   const candidates = [rotated, rotate180(rotated)];
 
   let bestBoxes = [];
@@ -145,7 +143,6 @@ async function detectWithBestOrientation(originalImage) {
   for (const testImg of candidates) {
     await new Promise(res => {
       testImg.onload = () => {
-        console.log("Rotated candidate loaded", testImg);
         res();
       };
     });
@@ -155,19 +152,24 @@ async function detectWithBestOrientation(originalImage) {
     const output = await session.run(feeds);
     const outputTensor = output[Object.keys(output)[0]];
     const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
+    const [batchSize, numDetections, valuesPerDetection] = outputTensor.dims;
+
+    console.log("Output tensor dims:", outputTensor.dims);
+    console.log("First few values:", rawData.slice(0, 10));
 
     const boxes = [];
 
     for (let i = 0; i < numDetections; i++) {
-      const x = rawData[i];
-      const y = rawData[i + numDetections];
-      const w = rawData[i + 2 * numDetections];
-      const h = rawData[i + 3 * numDetections];
-      const conf = rawData[i + 4 * numDetections];
+      const offset = i * valuesPerDetection;
+      const x = rawData[offset];
+      const y = rawData[offset + 1];
+      const w = rawData[offset + 2];
+      const h = rawData[offset + 3];
+      const conf = rawData[offset + 4];
+      const classId = rawData[offset + 5];
 
       if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf });
+        boxes.push({ x, y, w, h, conf, classId });
       }
     }
 
@@ -187,18 +189,12 @@ async function detectWithBestOrientation(originalImage) {
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
-  img.crossOrigin = 'anonymous';
   img.src = URL.createObjectURL(file);
 
   img.onload = async () => {
     console.log("Image loaded, running detection...");
     const { boxes, image } = await detectWithBestOrientation(img);
     console.log("Detection complete", boxes);
-
-    if (!boxes || boxes.length === 0) {
-      alert('No detections found.');
-      return;
-    }
 
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
