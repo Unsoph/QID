@@ -7,7 +7,7 @@ let detectSession, orientSession;
 
 async function init() {
   detectSession = await ort.InferenceSession.create('./best.onnx');
-  orientSession = await ort.InferenceSession.create('./orientation.onnx'); // Change this to your correct filename
+  orientSession = await ort.InferenceSession.create('./PP-OCRv3 Mobile Classifier.onnx'); // Change this to your correct filename
   console.log("✅ Both detection and orientation models loaded.");
 }
 
