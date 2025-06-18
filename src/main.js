@@ -10,6 +10,39 @@ async function init() {
   console.log("ONNX model loaded.");
 }
 
+function rotateIfVertical(image) {
+  if (image.naturalHeight > image.naturalWidth) {
+    const canvasTemp = document.createElement('canvas');
+    const ctxTemp = canvasTemp.getContext('2d');
+    canvasTemp.width = image.naturalHeight;
+    canvasTemp.height = image.naturalWidth;
+
+    ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
+    ctxTemp.rotate(-Math.PI / 2);
+    ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+
+    const rotatedImage = new Image();
+    rotatedImage.src = canvasTemp.toDataURL();
+    return rotatedImage;
+  }
+  return image;
+}
+
+function rotate180(image) {
+  const canvasTemp = document.createElement('canvas');
+  const ctxTemp = canvasTemp.getContext('2d');
+  canvasTemp.width = image.naturalWidth;
+  canvasTemp.height = image.naturalHeight;
+
+  ctxTemp.translate(canvasTemp.width, canvasTemp.height);
+  ctxTemp.rotate(Math.PI);
+  ctxTemp.drawImage(image, 0, 0);
+
+  const rotatedImage = new Image();
+  rotatedImage.src = canvasTemp.toDataURL();
+  return rotatedImage;
+}
+
 function preprocessImage(image) {
   const modelSize = 640;
   const canvasTemp = document.createElement('canvas');
@@ -47,7 +80,7 @@ function preprocessImage(image) {
   return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
 }
 
-function nonMaxSuppression(boxes, iouThreshold = 0.8) {
+function nonMaxSuppression(boxes, iouThreshold = 0.5) {
   boxes.sort((a, b) => b.conf - a.conf);
   const selected = [];
 
@@ -99,16 +132,17 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function handleImageUpload(event) {
-  const file = event.target.files[0];
-  const img = new Image();
+async function detectWithBestOrientation(image) {
+  const rotated = rotateIfVertical(image);
+  const candidates = [rotated, rotate180(rotated)];
 
-  img.onload = async () => {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
+  let bestBoxes = [];
+  let bestImage = null;
+  let bestConf = -Infinity;
 
-    const inputTensor = preprocessImage(img);
+  for (const testImg of candidates) {
+    await new Promise(res => (testImg.onload = res));
+    const inputTensor = preprocessImage(testImg);
     const feeds = { images: inputTensor };
     const output = await session.run(feeds);
     const outputTensor = output[Object.keys(output)[0]];
@@ -124,14 +158,35 @@ async function handleImageUpload(event) {
       const h = rawData[i + 3 * numDetections];
       const conf = rawData[i + 4 * numDetections];
 
-      if (conf > 0.5) {
+      if (conf > 0.4) {
         boxes.push({ x, y, w, h, conf });
       }
     }
 
     const finalBoxes = nonMaxSuppression(boxes);
+    const topConf = finalBoxes.length > 0 ? finalBoxes[0].conf : 0;
 
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+    if (topConf > bestConf) {
+      bestConf = topConf;
+      bestBoxes = finalBoxes;
+      bestImage = testImg;
+    }
+  }
+
+  return { boxes: bestBoxes, image: bestImage };
+}
+
+async function handleImageUpload(event) {
+  const file = event.target.files[0];
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+
+  img.onload = async () => {
+    const { boxes, image } = await detectWithBestOrientation(img);
+
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    ctx.drawImage(image, 0, 0);
 
     const scale = 1 / preprocessImage.lastScale;
     const padX = preprocessImage.lastPadX;
@@ -142,8 +197,8 @@ async function handleImageUpload(event) {
     ctx.font = '16px Arial';
     ctx.fillStyle = 'lime';
 
-    for (let i = 0; i < finalBoxes.length; i++) {
-      const box = finalBoxes[i];
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i];
       const x = (box.x - padX) * scale;
       const y = (box.y - padY) * scale;
       const w = box.w * scale;
@@ -154,10 +209,9 @@ async function handleImageUpload(event) {
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
 
-      cropAndDownload(img, left, top, w, h, i + 1);
+      cropAndDownload(image, left, top, w, h, i + 1);
     }
   };
-  img.src = URL.createObjectURL(file);
 }
 
 document.addEventListener('DOMContentLoaded', init);
