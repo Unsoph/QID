@@ -2,7 +2,7 @@ import * as ort from 'onnxruntime-web';
 import * as EXIF from 'exif-js';
 
 // Load YOLOv8 ONNX model
-const modelPath = 'model.onnx'; // adjust if in a subfolder
+const modelPath = 'best.onnx'; // adjust if in a subfolder
 
 let session;
 
