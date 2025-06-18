@@ -2,24 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>YOLOv8 ONNX Detection</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Aadhaar Card Detection with Orientation Correction</title>
   <style>
     body {
-      font-family: sans-serif;
-      margin: 20px;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #000000;
     }
-    canvas {
-      border: 1px solid #ccc;
-      margin-top: 10px;
-      max-width: 100%;
+    #output-canvas {
+      display: block;
+      margin-top: 20px;
+      border: 2px solid #ccc;
+    }
+    label {
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h1>YOLOv8 ONNX Detection</h1>
-  <input type="file" id="image-input" accept="image/*" />
+  <h1>Aadhaar Card Detector (with Orientation Correction)</h1>
+  <label for="image-input">Upload Image:</label>
+  <input type="file" id="image-input" accept="image/*"/>
   <canvas id="output-canvas"></canvas>
 
+  <!-- Scripts -->
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
