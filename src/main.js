@@ -119,7 +119,7 @@ async function preprocess(image) {
   return new ort.Tensor('float32', float32Data, [1, 3, modelHeight, modelWidth]);
 }
 
-function parseDetections(output, width, height, confThreshold = 0.25) {
+function parseDetections(output, width, height, confThreshold = 0.8) {
   const boxes = [];
 
   const numDetections = output.length / 6; // YOLOv8 gives [x1, y1, x2, y2, conf, class]
