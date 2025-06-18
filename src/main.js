@@ -10,27 +10,6 @@ async function init() {
   console.log("ONNX model loaded.");
 }
 
-function rotateImage(image, degrees) {
-  const canvasTemp = document.createElement('canvas');
-  const ctxTemp = canvasTemp.getContext('2d');
-
-  if (degrees % 180 === 0) {
-    canvasTemp.width = image.naturalWidth;
-    canvasTemp.height = image.naturalHeight;
-  } else {
-    canvasTemp.width = image.naturalHeight;
-    canvasTemp.height = image.naturalWidth;
-  }
-
-  ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
-  ctxTemp.rotate((degrees * Math.PI) / 180);
-  ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
-
-  const rotatedImg = new Image();
-  rotatedImg.src = canvasTemp.toDataURL();
-  return rotatedImg;
-}
-
 function preprocessImage(image) {
   const modelSize = 640;
   const canvasTemp = document.createElement('canvas');
@@ -68,7 +47,7 @@ function preprocessImage(image) {
   return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
 }
 
-function nonMaxSuppression(boxes, iouThreshold = 0.5) {
+function nonMaxSuppression(boxes, iouThreshold = 0.8) {
   boxes.sort((a, b) => b.conf - a.conf);
   const selected = [];
 
@@ -120,62 +99,39 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function runInference(img) {
-  const inputTensor = preprocessImage(img);
-  const feeds = { images: inputTensor };
-  const output = await session.run(feeds);
-  const outputTensor = output[Object.keys(output)[0]];
-  const rawData = outputTensor.data;
-  const [batch, channels, numDetections] = outputTensor.dims;
-
-  const boxes = [];
-  for (let i = 0; i < numDetections; i++) {
-    const x = rawData[i];
-    const y = rawData[i + numDetections];
-    const w = rawData[i + 2 * numDetections];
-    const h = rawData[i + 3 * numDetections];
-    const conf = rawData[i + 4 * numDetections];
-
-    if (conf > 0.4) {
-      boxes.push({ x, y, w, h, conf });
-    }
-  }
-
-  return nonMaxSuppression(boxes);
-}
-
 async function handleImageUpload(event) {
   const file = event.target.files[0];
-  const original = new Image();
-  original.src = URL.createObjectURL(file);
+  const img = new Image();
 
-  original.onload = async () => {
-    const isVertical = original.naturalHeight > original.naturalWidth;
-    const angleCandidates = isVertical ? [270, 0] : [0, 180];
+  img.onload = async () => {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
 
-    let bestBoxes = [];
-    let bestImg = original;
-    let bestAngle = 0;
+    const inputTensor = preprocessImage(img);
+    const feeds = { images: inputTensor };
+    const output = await session.run(feeds);
+    const outputTensor = output[Object.keys(output)[0]];
+    const rawData = outputTensor.data;
+    const [batch, channels, numDetections] = outputTensor.dims;
 
-    for (let angle of angleCandidates) {
-      const rotated = angle === 0 ? original : await new Promise(resolve => {
-        const r = rotateImage(original, angle);
-        r.onload = () => resolve(r);
-      });
+    const boxes = [];
 
-      const boxes = await runInference(rotated);
-      if (boxes.length && (!bestBoxes.length || boxes[0].conf > bestBoxes[0].conf)) {
-        bestBoxes = boxes;
-        bestImg = rotated;
-        bestAngle = angle;
+    for (let i = 0; i < numDetections; i++) {
+      const x = rawData[i];
+      const y = rawData[i + numDetections];
+      const w = rawData[i + 2 * numDetections];
+      const h = rawData[i + 3 * numDetections];
+      const conf = rawData[i + 4 * numDetections];
+
+      if (conf > 0.5) {
+        boxes.push({ x, y, w, h, conf });
       }
     }
 
-    console.log(`Best horizontal orientation: ${bestAngle}°, Conf: ${bestBoxes[0]?.conf.toFixed(2) || "None"}`);
+    const finalBoxes = nonMaxSuppression(boxes);
 
-    canvas.width = bestImg.naturalWidth;
-    canvas.height = bestImg.naturalHeight;
-    ctx.drawImage(bestImg, 0, 0);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
 
     const scale = 1 / preprocessImage.lastScale;
     const padX = preprocessImage.lastPadX;
@@ -186,8 +142,8 @@ async function handleImageUpload(event) {
     ctx.font = '16px Arial';
     ctx.fillStyle = 'lime';
 
-    for (let i = 0; i < bestBoxes.length; i++) {
-      const box = bestBoxes[i];
+    for (let i = 0; i < finalBoxes.length; i++) {
+      const box = finalBoxes[i];
       const x = (box.x - padX) * scale;
       const y = (box.y - padY) * scale;
       const w = box.w * scale;
@@ -198,9 +154,10 @@ async function handleImageUpload(event) {
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
 
-      cropAndDownload(bestImg, left, top, w, h, i + 1);
+      cropAndDownload(img, left, top, w, h, i + 1);
     }
   };
+  img.src = URL.createObjectURL(file);
 }
 
 document.addEventListener('DOMContentLoaded', init);
