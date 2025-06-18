@@ -4,12 +4,10 @@ const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
 const ctx = canvas.getContext('2d');
 let detectSession;
-let orientSession;
 
 async function init() {
   detectSession = await ort.InferenceSession.create('./best.onnx');
-  orientSession = await ort.InferenceSession.create('./cls_model.onnx');
-  console.log("✅ Both ONNX models loaded.");
+  console.log("✅ Detection model loaded.");
 }
 
 function preprocessImageForDetection(image) {
@@ -48,33 +46,16 @@ function preprocessImageForDetection(image) {
   return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
 }
 
-function preprocessImageForOrientation(image) {
-  const canvasTemp = document.createElement('canvas');
-  const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
-  canvasTemp.width = 192;
-  canvasTemp.height = 48;
-  ctxTemp.drawImage(image, 0, 0, 192, 48);
-
-  const imageData = ctxTemp.getImageData(0, 0, 192, 48).data;
-  const floatData = new Float32Array(3 * 48 * 192);
-
-  for (let i = 0; i < 192 * 48; i++) {
-    floatData[i] = imageData[i * 4] / 255;
-    floatData[i + 192 * 48] = imageData[i * 4 + 1] / 255;
-    floatData[i + 2 * 192 * 48] = imageData[i * 4 + 2] / 255;
-  }
-
-  return new ort.Tensor('float32', floatData, [1, 3, 48, 192]);
-}
-
 function rotateImage(image, degrees) {
   const canvasTemp = document.createElement('canvas');
   const ctxTemp = canvasTemp.getContext('2d');
   const rad = degrees * Math.PI / 180;
-  canvasTemp.width = degrees % 180 === 0 ? image.naturalWidth : image.naturalHeight;
-  canvasTemp.height = degrees % 180 === 0 ? image.naturalHeight : image.naturalWidth;
+  const width = degrees % 180 === 0 ? image.naturalWidth : image.naturalHeight;
+  const height = degrees % 180 === 0 ? image.naturalHeight : image.naturalWidth;
 
-  ctxTemp.translate(canvasTemp.width / 2, canvasTemp.height / 2);
+  canvasTemp.width = width;
+  canvasTemp.height = height;
+  ctxTemp.translate(width / 2, height / 2);
   ctxTemp.rotate(rad);
   ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
 
@@ -85,20 +66,27 @@ function rotateImage(image, degrees) {
   });
 }
 
-async function classifyOrientation(image) {
-  const inputTensor = preprocessImageForOrientation(image);
-  const feeds = { x: inputTensor };
-  const output = await orientSession.run(feeds);
-  const scores = output[Object.keys(output)[0]].data;
-  const maxIndex = scores.indexOf(Math.max(...scores));
-  return maxIndex; // 0: 0°, 1: 180°, 2: 90°, 3: 270°
-}
+async function runDetection(image) {
+  const inputTensor = preprocessImageForDetection(image);
+  const feeds = { images: inputTensor };
+  const output = await detectSession.run(feeds);
+  const outputTensor = output[Object.keys(output)[0]];
+  const rawData = outputTensor.data;
+  const [batch, channels, numDetections] = outputTensor.dims;
 
-async function correctImageOrientation(image) {
-  const orientation = await classifyOrientation(image);
-  const degreeMap = [0, 180, 270, 90];
-  if (orientation === 0) return image;
-  return await rotateImage(image, degreeMap[orientation]);
+  const boxes = [];
+  for (let i = 0; i < numDetections; i++) {
+    const x = rawData[i];
+    const y = rawData[i + numDetections];
+    const w = rawData[i + 2 * numDetections];
+    const h = rawData[i + 3 * numDetections];
+    const conf = rawData[i + 4 * numDetections];
+    if (conf > 0.4) {
+      boxes.push({ x, y, w, h, conf });
+    }
+  }
+
+  return boxes;
 }
 
 function nonMaxSuppression(boxes, iouThreshold = 0.5) {
@@ -144,37 +132,35 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
+async function autoRotateAndDetectBest(originalImage) {
+  const angles = [0, 90, 180, 270];
+  let best = { angle: 0, boxes: [], image: originalImage };
+
+  for (let angle of angles) {
+    const rotated = angle === 0 ? originalImage : await rotateImage(originalImage, angle);
+    const boxes = await runDetection(rotated);
+    const confidenceSum = boxes.reduce((sum, b) => sum + b.conf, 0);
+
+    if (boxes.length > best.boxes.length || confidenceSum > best.boxes.reduce((s, b) => s + b.conf, 0)) {
+      best = { angle, boxes, image: rotated };
+    }
+  }
+
+  return best;
+}
+
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
   img.src = URL.createObjectURL(file);
 
   img.onload = async () => {
-    console.log('📷 Original image loaded');
-    const corrected = await correctImageOrientation(img);
+    console.log('📷 Image loaded. Running detection...');
+    const { image: bestImage, boxes } = await autoRotateAndDetectBest(img);
 
-    canvas.width = corrected.naturalWidth;
-    canvas.height = corrected.naturalHeight;
-    ctx.drawImage(corrected, 0, 0);
-
-    const inputTensor = preprocessImageForDetection(corrected);
-    const feeds = { images: inputTensor };
-    const output = await detectSession.run(feeds);
-    const outputTensor = output[Object.keys(output)[0]];
-    const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
-
-    const boxes = [];
-    for (let i = 0; i < numDetections; i++) {
-      const x = rawData[i];
-      const y = rawData[i + numDetections];
-      const w = rawData[i + 2 * numDetections];
-      const h = rawData[i + 3 * numDetections];
-      const conf = rawData[i + 4 * numDetections];
-      if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf });
-      }
-    }
+    canvas.width = bestImage.naturalWidth;
+    canvas.height = bestImage.naturalHeight;
+    ctx.drawImage(bestImage, 0, 0);
 
     const finalBoxes = nonMaxSuppression(boxes);
     const scale = 1 / preprocessImageForDetection.lastScale;
@@ -197,7 +183,7 @@ async function handleImageUpload(event) {
 
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
-      cropAndDownload(corrected, left, top, w, h, i + 1);
+      cropAndDownload(bestImage, left, top, w, h, i + 1);
     }
   };
 }
