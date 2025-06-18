@@ -22,6 +22,7 @@ function rotateIfVertical(image) {
     ctxTemp.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
 
     const rotatedImage = new Image();
+    rotatedImage.crossOrigin = 'anonymous';
     rotatedImage.src = canvasTemp.toDataURL();
     return rotatedImage;
   }
@@ -39,6 +40,7 @@ function rotate180(image) {
   ctxTemp.drawImage(image, 0, 0);
 
   const rotatedImage = new Image();
+  rotatedImage.crossOrigin = 'anonymous';
   rotatedImage.src = canvasTemp.toDataURL();
   return rotatedImage;
 }
@@ -132,8 +134,8 @@ function cropAndDownload(image, x, y, w, h, index) {
   }, 'image/png');
 }
 
-async function detectWithBestOrientation(image) {
-  const rotated = rotateIfVertical(image);
+async function detectWithBestOrientation(originalImage) {
+  const rotated = rotateIfVertical(originalImage);
   const candidates = [rotated, rotate180(rotated)];
 
   let bestBoxes = [];
@@ -141,7 +143,13 @@ async function detectWithBestOrientation(image) {
   let bestConf = -Infinity;
 
   for (const testImg of candidates) {
-    await new Promise(res => (testImg.onload = res));
+    await new Promise(res => {
+      testImg.onload = () => {
+        console.log("Rotated candidate loaded", testImg);
+        res();
+      };
+    });
+
     const inputTensor = preprocessImage(testImg);
     const feeds = { images: inputTensor };
     const output = await session.run(feeds);
@@ -179,10 +187,18 @@ async function detectWithBestOrientation(image) {
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
+  img.crossOrigin = 'anonymous';
   img.src = URL.createObjectURL(file);
 
   img.onload = async () => {
+    console.log("Image loaded, running detection...");
     const { boxes, image } = await detectWithBestOrientation(img);
+    console.log("Detection complete", boxes);
+
+    if (!boxes || boxes.length === 0) {
+      alert('No detections found.');
+      return;
+    }
 
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
