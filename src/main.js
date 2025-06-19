@@ -13,10 +13,16 @@ async function init() {
   console.log("✅ Both ONNX models loaded.");
 }
 
+function softmax(arr) {
+  const max = Math.max(...arr);
+  const exps = arr.map(v => Math.exp(v - max));
+  const sum = exps.reduce((a, b) => a + b);
+  return exps.map(v => v / sum);
+}
+
 function preprocessOrientation(image) {
   const canvasTemp = document.createElement('canvas');
   const ctxTemp = canvasTemp.getContext('2d');
-
   canvasTemp.width = 224;
   canvasTemp.height = 224;
   ctxTemp.drawImage(image, 0, 0, 224, 224);
@@ -36,17 +42,20 @@ function rotateImage(image, angle) {
   const canvasRotated = document.createElement('canvas');
   const ctxRotated = canvasRotated.getContext('2d');
 
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+
   if (angle === 90 || angle === 270) {
-    canvasRotated.width = image.height;
-    canvasRotated.height = image.width;
+    canvasRotated.width = height;
+    canvasRotated.height = width;
   } else {
-    canvasRotated.width = image.width;
-    canvasRotated.height = image.height;
+    canvasRotated.width = width;
+    canvasRotated.height = height;
   }
 
   ctxRotated.translate(canvasRotated.width / 2, canvasRotated.height / 2);
   ctxRotated.rotate((angle * Math.PI) / 180);
-  ctxRotated.drawImage(image, -image.width / 2, -image.height / 2);
+  ctxRotated.drawImage(image, -width / 2, -height / 2);
 
   return canvasRotated;
 }
@@ -148,17 +157,20 @@ async function handleImageUpload(event) {
     // Step 1: Predict orientation
     const orientationInput = preprocessOrientation(img);
     const orientationOutput = await orientationSession.run({ input: orientationInput });
-    const rotation = orientationOutput.output.data.indexOf(Math.max(...orientationOutput.output.data)) * 90;
+    const scores = softmax(orientationOutput.output.data);
+    const rotation = scores.indexOf(Math.max(...scores)) * 90;
+
+    console.log("📐 Orientation scores:", scores, "| Rotation:", rotation);
 
     // Step 2: Rotate to correct orientation
     const correctedCanvas = rotateImage(img, rotation);
 
-    // Step 3: Draw corrected image on main canvas
+    // Step 3: Draw corrected image
     canvas.width = correctedCanvas.width;
     canvas.height = correctedCanvas.height;
     ctx.drawImage(correctedCanvas, 0, 0);
 
-    // Step 4: Run cropper model
+    // Step 4: Aadhaar cropper model
     const inputTensor = preprocessImage(correctedCanvas);
     const feeds = { images: inputTensor };
     const output = await cropperSession.run(feeds);
