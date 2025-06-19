@@ -1,8 +1,11 @@
 import * as ort from 'onnxruntime-web';
+import JSZip from 'jszip';
 
 const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
 const ctx = canvas.getContext('2d');
+const rotationDisplay = document.getElementById('rotation-info');
+const loader = document.getElementById('loader');
 
 let cropperSession;
 let orientationSession;
@@ -133,73 +136,53 @@ function calculateIoU(a, b) {
   return interArea / (boxAArea + boxBArea - interArea);
 }
 
-function cropAndDownload(image, x, y, w, h, index) {
-  const cropCanvas = document.createElement('canvas');
-  const cropCtx = cropCanvas.getContext('2d');
-  cropCanvas.width = w;
-  cropCanvas.height = h;
-  cropCtx.drawImage(image, x, y, w, h, 0, 0, w, h);
-
-  cropCanvas.toBlob(blob => {
-    const link = document.createElement('a');
-    link.download = `crop_${index}.png`;
-    link.href = URL.createObjectURL(blob);
-    link.click();
-    URL.revokeObjectURL(link.href);
-  }, 'image/png');
-}
-
 async function handleImageUpload(event) {
   const file = event.target.files[0];
   const img = new Image();
 
   img.onload = async () => {
+    loader.style.display = 'block';
+
     // Step 1: Predict orientation
     const orientationInput = preprocessOrientation(img);
     const orientationOutput = await orientationSession.run({ input: orientationInput });
     const scores = softmax(orientationOutput.output.data);
-    const rotation = scores.indexOf(Math.max(...scores)) * 90;
+    const maxScore = Math.max(...scores);
+    const rotation = maxScore < 0.5 ? 0 : scores.indexOf(maxScore) * 90;
 
-    console.log("📐 Orientation scores:", scores, "| Rotation:", rotation);
+    rotationDisplay.textContent = `📐 Rotation Applied: ${rotation}°`;
 
-    // Step 2: Rotate to correct orientation
+    // Step 2: Rotate image
     const correctedCanvas = rotateImage(img, rotation);
 
-    // Step 3: Draw corrected image
+    // Step 3: Set canvas
     canvas.width = correctedCanvas.width;
     canvas.height = correctedCanvas.height;
     ctx.drawImage(correctedCanvas, 0, 0);
 
-    // Step 4: Aadhaar cropper model
+    // Step 4: Detect Aadhaar
     const inputTensor = preprocessImage(correctedCanvas);
-    const feeds = { images: inputTensor };
-    const output = await cropperSession.run(feeds);
-    const outputTensor = output[Object.keys(output)[0]];
-    const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
+    const output = await cropperSession.run({ images: inputTensor });
+    const rawData = output[Object.keys(output)[0]].data;
+    const [batch, channels, numDetections] = output[Object.keys(output)[0]].dims;
 
     const boxes = [];
-
     for (let i = 0; i < numDetections; i++) {
       const x = rawData[i];
       const y = rawData[i + numDetections];
       const w = rawData[i + 2 * numDetections];
       const h = rawData[i + 3 * numDetections];
       const conf = rawData[i + 4 * numDetections];
-
-      if (conf > 0.4) {
-        boxes.push({ x, y, w, h, conf });
-      }
+      if (conf > 0.4) boxes.push({ x, y, w, h, conf });
     }
 
     const finalBoxes = nonMaxSuppression(boxes);
-
-    ctx.drawImage(correctedCanvas, 0, 0);
-
     const scale = 1 / preprocessImage.lastScale;
     const padX = preprocessImage.lastPadX;
     const padY = preprocessImage.lastPadY;
 
+    const zip = new JSZip();
+    ctx.drawImage(correctedCanvas, 0, 0);
     ctx.strokeStyle = 'lime';
     ctx.lineWidth = 2;
     ctx.font = '16px Arial';
@@ -217,8 +200,23 @@ async function handleImageUpload(event) {
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
 
-      cropAndDownload(correctedCanvas, left, top, w, h, i + 1);
+      const cropCanvas = document.createElement('canvas');
+      const cropCtx = cropCanvas.getContext('2d');
+      cropCanvas.width = w;
+      cropCanvas.height = h;
+      cropCtx.drawImage(correctedCanvas, left, top, w, h, 0, 0, w, h);
+
+      const blob = await new Promise(resolve => cropCanvas.toBlob(resolve, 'image/png'));
+      zip.file(`aadhaar_crop_${i + 1}.png`, blob);
     }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const zipLink = document.createElement('a');
+    zipLink.href = URL.createObjectURL(zipBlob);
+    zipLink.download = 'aadhaar_crops.zip';
+    zipLink.click();
+
+    loader.style.display = 'none';
   };
 
   img.src = URL.createObjectURL(file);
