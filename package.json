@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "exif-js": "^2.3.0",
+    "jszip": "^3.10.1",
     "onnxruntime-web": "^1.22.0"
   }
 }
