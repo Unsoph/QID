@@ -3,11 +3,52 @@ import * as ort from 'onnxruntime-web';
 const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
 const ctx = canvas.getContext('2d');
-let session;
+
+let cropperSession;
+let orientationSession;
 
 async function init() {
-  session = await ort.InferenceSession.create('./best.onnx');
-  console.log("ONNX model loaded.");
+  cropperSession = await ort.InferenceSession.create('./best.onnx');
+  orientationSession = await ort.InferenceSession.create('./aadhaar_orientation.onnx');
+  console.log("✅ Both ONNX models loaded.");
+}
+
+function preprocessOrientation(image) {
+  const canvasTemp = document.createElement('canvas');
+  const ctxTemp = canvasTemp.getContext('2d');
+
+  canvasTemp.width = 224;
+  canvasTemp.height = 224;
+  ctxTemp.drawImage(image, 0, 0, 224, 224);
+  const imageData = ctxTemp.getImageData(0, 0, 224, 224).data;
+
+  const floatData = new Float32Array(3 * 224 * 224);
+  for (let i = 0; i < 224 * 224; i++) {
+    floatData[i] = imageData[i * 4] / 255;
+    floatData[i + 224 * 224] = imageData[i * 4 + 1] / 255;
+    floatData[i + 2 * 224 * 224] = imageData[i * 4 + 2] / 255;
+  }
+
+  return new ort.Tensor('float32', floatData, [1, 3, 224, 224]);
+}
+
+function rotateImage(image, angle) {
+  const canvasRotated = document.createElement('canvas');
+  const ctxRotated = canvasRotated.getContext('2d');
+
+  if (angle === 90 || angle === 270) {
+    canvasRotated.width = image.height;
+    canvasRotated.height = image.width;
+  } else {
+    canvasRotated.width = image.width;
+    canvasRotated.height = image.height;
+  }
+
+  ctxRotated.translate(canvasRotated.width / 2, canvasRotated.height / 2);
+  ctxRotated.rotate((angle * Math.PI) / 180);
+  ctxRotated.drawImage(image, -image.width / 2, -image.height / 2);
+
+  return canvasRotated;
 }
 
 function preprocessImage(image) {
@@ -15,8 +56,8 @@ function preprocessImage(image) {
   const canvasTemp = document.createElement('canvas');
   const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
 
-  const imgW = image.naturalWidth;
-  const imgH = image.naturalHeight;
+  const imgW = image.naturalWidth || image.width;
+  const imgH = image.naturalHeight || image.height;
   const scale = Math.min(modelSize / imgW, modelSize / imgH);
   const resizedW = Math.round(imgW * scale);
   const resizedH = Math.round(imgH * scale);
@@ -104,13 +145,23 @@ async function handleImageUpload(event) {
   const img = new Image();
 
   img.onload = async () => {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
+    // Step 1: Predict orientation
+    const orientationInput = preprocessOrientation(img);
+    const orientationOutput = await orientationSession.run({ input: orientationInput });
+    const rotation = orientationOutput.output.data.indexOf(Math.max(...orientationOutput.output.data)) * 90;
 
-    const inputTensor = preprocessImage(img);
+    // Step 2: Rotate to correct orientation
+    const correctedCanvas = rotateImage(img, rotation);
+
+    // Step 3: Draw corrected image on main canvas
+    canvas.width = correctedCanvas.width;
+    canvas.height = correctedCanvas.height;
+    ctx.drawImage(correctedCanvas, 0, 0);
+
+    // Step 4: Run cropper model
+    const inputTensor = preprocessImage(correctedCanvas);
     const feeds = { images: inputTensor };
-    const output = await session.run(feeds);
+    const output = await cropperSession.run(feeds);
     const outputTensor = output[Object.keys(output)[0]];
     const rawData = outputTensor.data;
     const [batch, channels, numDetections] = outputTensor.dims;
@@ -131,7 +182,7 @@ async function handleImageUpload(event) {
 
     const finalBoxes = nonMaxSuppression(boxes);
 
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+    ctx.drawImage(correctedCanvas, 0, 0);
 
     const scale = 1 / preprocessImage.lastScale;
     const padX = preprocessImage.lastPadX;
@@ -154,9 +205,10 @@ async function handleImageUpload(event) {
       ctx.strokeRect(left, top, w, h);
       ctx.fillText(`Conf: ${box.conf.toFixed(2)}`, left, top > 20 ? top - 5 : top + 15);
 
-      cropAndDownload(img, left, top, w, h, i + 1);
+      cropAndDownload(correctedCanvas, left, top, w, h, i + 1);
     }
   };
+
   img.src = URL.createObjectURL(file);
 }
 

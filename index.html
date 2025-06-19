@@ -8,25 +8,40 @@
     body {
       font-family: Arial, sans-serif;
       padding: 20px;
-      background: #ffffff;
+      background: #f9f9f9;
     }
+
+    h1 {
+      color: #333;
+    }
+
     #output-canvas {
       display: block;
       margin-top: 20px;
       border: 2px solid #ccc;
+      max-width: 100%;
     }
+
     label {
       font-weight: bold;
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    input[type="file"] {
+      margin-bottom: 20px;
     }
   </style>
 </head>
 <body>
-  <h1>Aadhaar Card Detector (with Orientation Correction)</h1>
-  <label for="image-input">Upload Image:</label>
+  <h1>Aadhaar Card Detector <small>(Auto Orientation + Cropping)</small></h1>
+  
+  <label for="image-input">Upload Aadhaar Image:</label>
   <input type="file" id="image-input" accept="image/*"/>
+
   <canvas id="output-canvas"></canvas>
 
-  <!-- Scripts -->
+  <!-- Load App -->
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
