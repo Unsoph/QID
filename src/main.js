@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web';
 import JSZip from 'jszip';
-import Tesseract from 'tesseract.js';
+import { createWorker } from 'tesseract.js';
 
 const imageInput = document.getElementById('image-input');
 const canvas = document.getElementById('output-canvas');
@@ -37,32 +37,38 @@ function rotateImage(image, angle) {
   return canvasRotated;
 }
 
-function scoreRotation(result) {
-  const words = result?.data?.words || [];
-  const keywords = ['aadhaar', 'government', 'india', 'male', 'dob', 'vid', 'योजना', 'भारत', 'सरकार', 'जन्म'];
-  let keywordMatches = 0;
+async function detectBestRotation(image) {
+  const worker = await createWorker({
+    logger: m => console.log(m),
+    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+  });
 
-  for (let word of words) {
-    const text = word.text?.toLowerCase?.() || '';
-    if (keywords.some(k => text.includes(k))) keywordMatches++;
-  }
-
-  const confidence = words.reduce((sum, w) => sum + (w.confidence || 0), 0) / (words.length || 1);
-  return confidence + keywordMatches * 10;
-}
-
-async function detectOrientation(image) {
   const angles = [0, 90, 180, 270];
-  let bestScore = -Infinity;
+  const keywords = ['भारत', 'Government', 'भारत सरकार', 'GOVT OF INDIA', 'Aadhaar'];
+
   let bestAngle = 0;
+  let bestScore = -1;
 
-  for (const angle of angles) {
-    const canvasRotated = rotateImage(image, angle);
-    const result = await Tesseract.recognize(canvasRotated, 'eng+hin', {
-      logger: () => {}
-    });
+  for (let angle of angles) {
+    const rotated = rotateImage(image, angle);
 
-    const score = scoreRotation(result);
+    const scaledCanvas = document.createElement('canvas');
+    const ctx = scaledCanvas.getContext('2d');
+    const targetWidth = 600;
+    const scale = targetWidth / rotated.width;
+    scaledCanvas.width = targetWidth;
+    scaledCanvas.height = rotated.height * scale;
+    ctx.drawImage(rotated, 0, 0, scaledCanvas.width, scaledCanvas.height);
+
+    const { data: { text } } = await worker.recognize(scaledCanvas, 'hin+eng');
+    let score = 0;
+
+    for (let keyword of keywords) {
+      if (text.includes(keyword)) {
+        score++;
+      }
+    }
+
     console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
     if (score > bestScore) {
       bestScore = score;
@@ -70,6 +76,7 @@ async function detectOrientation(image) {
     }
   }
 
+  await worker.terminate();
   return bestAngle;
 }
 
@@ -78,18 +85,16 @@ function preprocessImage(image) {
   const canvasTemp = document.createElement('canvas');
   const ctxTemp = canvasTemp.getContext('2d', { willReadFrequently: true });
 
-  const imgW = image.naturalWidth || image.width;
-  const imgH = image.naturalHeight || image.height;
+  const imgW = image.width;
+  const imgH = image.height;
   const scale = Math.min(modelSize / imgW, modelSize / imgH);
   const resizedW = Math.round(imgW * scale);
   const resizedH = Math.round(imgH * scale);
-
   const padX = Math.floor((modelSize - resizedW) / 2);
   const padY = Math.floor((modelSize - resizedH) / 2);
 
   canvasTemp.width = modelSize;
   canvasTemp.height = modelSize;
-
   ctxTemp.fillStyle = 'black';
   ctxTemp.fillRect(0, 0, modelSize, modelSize);
   ctxTemp.drawImage(image, padX, padY, resizedW, resizedH);
@@ -138,11 +143,9 @@ function calculateIoU(a, b) {
   const y1 = Math.max(a.y - a.h / 2, b.y - b.h / 2);
   const x2 = Math.min(a.x + a.w / 2, b.x + b.w / 2);
   const y2 = Math.min(a.y + a.h / 2, b.y + b.h / 2);
-
   const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
   const boxAArea = a.w * a.h;
   const boxBArea = b.w * b.h;
-
   return interArea / (boxAArea + boxBArea - interArea);
 }
 
@@ -153,10 +156,10 @@ async function handleImageUpload(event) {
   img.onload = async () => {
     loader.style.display = 'block';
 
-    const rotation = await detectOrientation(img);
+    const rotation = await detectBestRotation(img);
     rotationDisplay.textContent = `📐 Rotation Applied: ${rotation}°`;
-
     const correctedCanvas = rotateImage(img, rotation);
+
     canvas.width = correctedCanvas.width;
     canvas.height = correctedCanvas.height;
     ctx.drawImage(correctedCanvas, 0, 0);
