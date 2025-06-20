@@ -18,6 +18,7 @@ async function init() {
 function rotateImage(image, angle) {
   const canvasRotated = document.createElement('canvas');
   const ctxRotated = canvasRotated.getContext('2d');
+
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
 
@@ -61,14 +62,19 @@ async function detectBestRotation(image) {
     scaledCanvas.height = rotated.height * scale;
     ctx.drawImage(rotated, 0, 0, scaledCanvas.width, scaledCanvas.height);
 
-    const { data: { text } } = await worker.recognize(scaledCanvas);
-    let score = 0;
+    const {
+      data: { text }
+    } = await worker.recognize(scaledCanvas);
 
+    let score = 0;
     for (let keyword of keywords) {
-      if (text.includes(keyword)) score++;
+      if (text.includes(keyword)) {
+        score++;
+      }
     }
 
     console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
+
     if (score > bestScore) {
       bestScore = score;
       bestAngle = angle;
@@ -157,8 +163,8 @@ async function handleImageUpload(event) {
 
     const rotation = await detectBestRotation(img);
     rotationDisplay.textContent = `📐 Rotation Applied: ${rotation}°`;
-    const correctedCanvas = rotateImage(img, rotation);
 
+    const correctedCanvas = rotateImage(img, rotation);
     canvas.width = correctedCanvas.width;
     canvas.height = correctedCanvas.height;
     ctx.drawImage(correctedCanvas, 0, 0);
