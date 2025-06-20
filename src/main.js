@@ -18,7 +18,6 @@ async function init() {
 function rotateImage(image, angle) {
   const canvasRotated = document.createElement('canvas');
   const ctxRotated = canvasRotated.getContext('2d');
-
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
 
@@ -39,12 +38,11 @@ function rotateImage(image, angle) {
 
 async function detectBestRotation(image) {
   const worker = await createWorker({
-    logger: m => console.log(m), // 👈 don't pass `console.log` directly
     langPath: 'https://tessdata.projectnaptha.com/4.0.0',
   });
 
-  await worker.loadLanguage('hin+eng');
-  await worker.initialize('hin+eng');
+  await worker.loadLanguage('eng+hin');
+  await worker.initialize('eng+hin');
 
   const angles = [0, 90, 180, 270];
   const keywords = ['भारत', 'Government', 'भारत सरकार', 'GOVT OF INDIA', 'Aadhaar'];
@@ -63,8 +61,9 @@ async function detectBestRotation(image) {
     scaledCanvas.height = rotated.height * scale;
     ctx.drawImage(rotated, 0, 0, scaledCanvas.width, scaledCanvas.height);
 
-    const { data: { text } } = await worker.recognize(scaledCanvas, 'hin+eng');
+    const { data: { text } } = await worker.recognize(scaledCanvas);
     let score = 0;
+
     for (let keyword of keywords) {
       if (text.includes(keyword)) score++;
     }
