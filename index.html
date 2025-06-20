@@ -14,6 +14,7 @@
       display: block;
       margin-top: 20px;
       border: 2px solid #ccc;
+      max-width: 100%;
     }
     #loader {
       margin-top: 10px;
@@ -27,15 +28,15 @@
 </head>
 <body>
   <h1>Aadhaar Card Detector (with Orientation Correction)</h1>
+
   <label for="image-input">Upload Image:</label>
   <input type="file" id="image-input" accept="image/*" />
-  <p id="rotation-info">📐 Rotation Applied: </p>
-  <div id="loader" style="display: none;">⏳ Processing...</div>
-  <canvas id="output-canvas"></canvas>
-  <p id="rotation-info">📐 Rotation: Detecting...</p>
-  <div id="loader" style="display:none;">🔄 Processing...</div>
 
-  <!-- Scripts -->
+  <p id="rotation-info">📐 Rotation Applied: </p>
+  <div id="loader" style="display: none;">🔄 Processing...</div>
+  <canvas id="output-canvas"></canvas>
+
+  <!-- Script -->
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

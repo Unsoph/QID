@@ -171,14 +171,14 @@ async function handleImageUpload(event) {
     const outputMap = await cropperSession.run({ images: inputTensor });
 
     const outputTensor = Object.values(outputMap)[0];
-    if (!outputTensor || !outputTensor.data || !outputTensor.dims) {
-      console.error("❌ Invalid model output format:", outputTensor);
+    if (!outputTensor || !outputTensor.data) {
+      console.error("❌ Invalid model output:", outputTensor);
       loader.style.display = 'none';
       return;
     }
 
     const rawData = outputTensor.data;
-    const [batch, channels, numDetections] = outputTensor.dims;
+    const numDetections = rawData.length / 5;
 
     const boxes = [];
     for (let i = 0; i < numDetections; i++) {
