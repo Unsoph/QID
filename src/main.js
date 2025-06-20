@@ -37,9 +37,7 @@ function rotateImage(image, angle) {
 }
 
 async function detectBestRotation(image) {
-  const worker = await createWorker({
-    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-  });
+  const worker = await createWorker({ langPath: 'https://tessdata.projectnaptha.com/4.0.0' });
 
   await worker.load();
   await worker.loadLanguage('eng+hin');
@@ -63,8 +61,8 @@ async function detectBestRotation(image) {
     ctx.drawImage(rotated, 0, 0, scaledCanvas.width, scaledCanvas.height);
 
     try {
-      const { data } = await worker.recognize(scaledCanvas);
-      const text = data?.text || '';
+      const result = await worker.recognize(scaledCanvas);
+      const text = result.data?.text || '';
       let score = 0;
 
       for (let keyword of keywords) {
@@ -170,9 +168,17 @@ async function handleImageUpload(event) {
     ctx.drawImage(correctedCanvas, 0, 0);
 
     const inputTensor = preprocessImage(correctedCanvas);
-    const output = await cropperSession.run({ images: inputTensor });
-    const rawData = output[Object.keys(output)[0]].data;
-    const [batch, channels, numDetections] = output[Object.keys(output)[0]].dims;
+    const outputMap = await cropperSession.run({ images: inputTensor });
+
+    const outputTensor = Object.values(outputMap)[0];
+    if (!outputTensor || !outputTensor.data || !outputTensor.dims) {
+      console.error("❌ Invalid model output format:", outputTensor);
+      loader.style.display = 'none';
+      return;
+    }
+
+    const rawData = outputTensor.data;
+    const [batch, channels, numDetections] = outputTensor.dims;
 
     const boxes = [];
     for (let i = 0; i < numDetections; i++) {
