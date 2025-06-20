@@ -24,6 +24,13 @@
     label {
       font-weight: bold;
     }
+    .info-box {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 5px;
+      padding: 10px;
+      margin: 10px 0;
+    }
   </style>
 </head>
 <body>
@@ -32,11 +39,53 @@
   <label for="image-input">Upload Image:</label>
   <input type="file" id="image-input" accept="image/*" />
 
-  <p id="rotation-info">📐 Rotation Applied: </p>
+  <div class="info-box">
+    <p id="rotation-info">📐 Rotation Applied: None</p>
+    <p id="detection-info">🎯 Detections: None</p>
+  </div>
+  
   <div id="loader" style="display: none;">🔄 Processing...</div>
   <canvas id="output-canvas"></canvas>
 
-  <!-- Script -->
-  <script type="module" src="./src/main.js"></script>
+  <!-- ONNX Runtime Web -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.14.0/ort.min.js"></script>
+  
+  <!-- Optional: Tesseract.js for enhanced OCR (uncomment if needed) -->
+  <!-- <script src="https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js"></script> -->
+
+  <!-- Your main script -->
+  <script type="module">
+    // Your enhanced JavaScript code goes here
+    import * as ort from 'onnxruntime-web';
+
+    const imageInput = document.getElementById('image-input');
+    const canvas = document.getElementById('output-canvas');
+    const ctx = canvas.getContext('2d');
+    const rotationInfo = document.getElementById('rotation-info');
+    const detectionInfo = document.getElementById('detection-info');
+    const loader = document.getElementById('loader');
+    let session;
+
+    // Aadhaar keywords for orientation detection
+    const AADHAAR_KEYWORDS = [
+        "government of india", "govt of india", "dob", "year of birth",
+        "male", "female", "vid", "aadhaar", "आधार", "भारत सरकार"
+    ];
+
+    async function init() {
+      try {
+        session = await ort.InferenceSession.create('./public/best.onnx');
+        console.log("ONNX model loaded.");
+      } catch (error) {
+        console.error("Failed to load ONNX model:", error);
+        alert("Failed to load ML model. Please ensure 'best.onnx' is in the correct location.");
+      }
+    }
+
+    // [Rest of your JavaScript code from the artifact goes here...]
+    
+    document.addEventListener('DOMContentLoaded', init);
+    imageInput.addEventListener('change', handleImageUpload);
+  </script>
 </body>
 </html>
