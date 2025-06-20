@@ -15,14 +15,10 @@ async function init() {
   console.log("✅ Cropper model loaded.");
 }
 
-const AADHAAR_KEYWORDS = [
-  "government of india", "govt of india", "dob", "year of birth",
-  "male", "female", "vid", "aadhaar", "आधार", "भारत सरकार"
-];
-
 function rotateImage(image, angle) {
   const canvasRotated = document.createElement('canvas');
   const ctxRotated = canvasRotated.getContext('2d');
+
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
 
@@ -37,35 +33,44 @@ function rotateImage(image, angle) {
   ctxRotated.translate(canvasRotated.width / 2, canvasRotated.height / 2);
   ctxRotated.rotate((angle * Math.PI) / 180);
   ctxRotated.drawImage(image, -width / 2, -height / 2);
+
   return canvasRotated;
 }
 
-async function getBestRotation(image) {
-  let bestRotation = 0;
+function scoreRotation(result) {
+  const words = result?.data?.words || [];
+  const keywords = ['aadhaar', 'government', 'india', 'male', 'dob', 'vid', 'योजना', 'भारत', 'सरकार', 'जन्म'];
+  let keywordMatches = 0;
+
+  for (let word of words) {
+    const text = word.text?.toLowerCase?.() || '';
+    if (keywords.some(k => text.includes(k))) keywordMatches++;
+  }
+
+  const confidence = words.reduce((sum, w) => sum + (w.confidence || 0), 0) / (words.length || 1);
+  return confidence + keywordMatches * 10;
+}
+
+async function detectOrientation(image) {
+  const angles = [0, 90, 180, 270];
   let bestScore = -Infinity;
+  let bestAngle = 0;
 
-  for (let angle of [0, 90, 180, 270]) {
-    const rotatedCanvas = rotateImage(image, angle);
-    const dataURL = rotatedCanvas.toDataURL('image/jpeg');
-    const { data: { text, words } } = await Tesseract.recognize(
-      dataURL,
-      'eng',
-      { logger: m => console.log(m) }
-    );
+  for (const angle of angles) {
+    const canvasRotated = rotateImage(image, angle);
+    const result = await Tesseract.recognize(canvasRotated, 'eng+hin', {
+      logger: () => {}
+    });
 
-    const wordConfs = words.map(w => parseFloat(w.conf)).filter(c => !isNaN(c));
-    const ocrScore = wordConfs.reduce((a, b) => a + b, 0);
-    const textLower = text.toLowerCase();
-    const keywordHits = AADHAAR_KEYWORDS.reduce((sum, kw) => sum + textLower.includes(kw), 0);
-    const totalScore = ocrScore + keywordHits * 100;
-
-    if (totalScore > bestScore) {
-      bestScore = totalScore;
-      bestRotation = angle;
+    const score = scoreRotation(result);
+    console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = angle;
     }
   }
 
-  return bestRotation;
+  return bestAngle;
 }
 
 function preprocessImage(image) {
@@ -84,12 +89,14 @@ function preprocessImage(image) {
 
   canvasTemp.width = modelSize;
   canvasTemp.height = modelSize;
+
   ctxTemp.fillStyle = 'black';
   ctxTemp.fillRect(0, 0, modelSize, modelSize);
   ctxTemp.drawImage(image, padX, padY, resizedW, resizedH);
 
   const imageData = ctxTemp.getImageData(0, 0, modelSize, modelSize).data;
   const floatData = new Float32Array(modelSize * modelSize * 3);
+
   for (let i = 0; i < modelSize * modelSize; i++) {
     floatData[i] = imageData[i * 4] / 255;
     floatData[i + modelSize * modelSize] = imageData[i * 4 + 1] / 255;
@@ -99,15 +106,18 @@ function preprocessImage(image) {
   preprocessImage.lastPadX = padX;
   preprocessImage.lastPadY = padY;
   preprocessImage.lastScale = scale;
+
   return new ort.Tensor('float32', floatData, [1, 3, modelSize, modelSize]);
 }
 
 function nonMaxSuppression(boxes, iouThreshold = 0.8) {
   boxes.sort((a, b) => b.conf - a.conf);
   const selected = [];
+
   for (let i = 0; i < boxes.length; i++) {
     const a = boxes[i];
     let keep = true;
+
     for (let j = 0; j < selected.length; j++) {
       const b = selected[j];
       const iou = calculateIoU(a, b);
@@ -116,8 +126,10 @@ function nonMaxSuppression(boxes, iouThreshold = 0.8) {
         break;
       }
     }
+
     if (keep) selected.push(a);
   }
+
   return selected;
 }
 
@@ -126,9 +138,11 @@ function calculateIoU(a, b) {
   const y1 = Math.max(a.y - a.h / 2, b.y - b.h / 2);
   const x2 = Math.min(a.x + a.w / 2, b.x + b.w / 2);
   const y2 = Math.min(a.y + a.h / 2, b.y + b.h / 2);
+
   const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
   const boxAArea = a.w * a.h;
   const boxBArea = b.w * b.h;
+
   return interArea / (boxAArea + boxBArea - interArea);
 }
 
@@ -139,10 +153,10 @@ async function handleImageUpload(event) {
   img.onload = async () => {
     loader.style.display = 'block';
 
-    const bestRotation = await getBestRotation(img);
-    rotationDisplay.textContent = `🖐 Rotation Applied: ${bestRotation}°`;
+    const rotation = await detectOrientation(img);
+    rotationDisplay.textContent = `📐 Rotation Applied: ${rotation}°`;
 
-    const correctedCanvas = rotateImage(img, bestRotation);
+    const correctedCanvas = rotateImage(img, rotation);
     canvas.width = correctedCanvas.width;
     canvas.height = correctedCanvas.height;
     ctx.drawImage(correctedCanvas, 0, 0);
