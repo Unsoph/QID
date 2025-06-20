@@ -18,7 +18,6 @@ async function init() {
 function rotateImage(image, angle) {
   const canvasRotated = document.createElement('canvas');
   const ctxRotated = canvasRotated.getContext('2d');
-
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
 
@@ -40,8 +39,10 @@ function rotateImage(image, angle) {
 async function detectBestRotation(image) {
   const worker = await createWorker({
     langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+    // DO NOT use logger: console.log here – will break postMessage
   });
 
+  await worker.load();
   await worker.loadLanguage('eng+hin');
   await worker.initialize('eng+hin');
 
@@ -62,22 +63,22 @@ async function detectBestRotation(image) {
     scaledCanvas.height = rotated.height * scale;
     ctx.drawImage(rotated, 0, 0, scaledCanvas.width, scaledCanvas.height);
 
-    const {
-      data: { text }
-    } = await worker.recognize(scaledCanvas);
+    try {
+      const { data } = await worker.recognize(scaledCanvas);
+      const text = data?.text || "";
+      let score = 0;
 
-    let score = 0;
-    for (let keyword of keywords) {
-      if (text.includes(keyword)) {
-        score++;
+      for (let keyword of keywords) {
+        if (text.includes(keyword)) score++;
       }
-    }
 
-    console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestAngle = angle;
+      console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = angle;
+      }
+    } catch (err) {
+      console.warn(`❌ OCR failed at ${angle}°`, err);
     }
   }
 
