@@ -39,9 +39,12 @@ function rotateImage(image, angle) {
 
 async function detectBestRotation(image) {
   const worker = await createWorker({
-    logger: m => console.log(m),
+    logger: m => console.log(m), // 👈 don't pass `console.log` directly
     langPath: 'https://tessdata.projectnaptha.com/4.0.0',
   });
+
+  await worker.loadLanguage('hin+eng');
+  await worker.initialize('hin+eng');
 
   const angles = [0, 90, 180, 270];
   const keywords = ['भारत', 'Government', 'भारत सरकार', 'GOVT OF INDIA', 'Aadhaar'];
@@ -62,11 +65,8 @@ async function detectBestRotation(image) {
 
     const { data: { text } } = await worker.recognize(scaledCanvas, 'hin+eng');
     let score = 0;
-
     for (let keyword of keywords) {
-      if (text.includes(keyword)) {
-        score++;
-      }
+      if (text.includes(keyword)) score++;
     }
 
     console.log(`🔄 Rotation ${angle}° → Score: ${score}`);
